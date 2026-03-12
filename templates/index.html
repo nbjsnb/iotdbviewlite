@@ -1,0 +1,170 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IoTDB Lite Viewer</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>IoTDB Lite Viewer</h1>
+    <div class="conn">
+      <select id="themeSelect" title="主题">
+        <option value="compact_blue" selected>蓝灰紧凑</option>
+        <option value="light_clean">浅色清爽</option>
+        <option value="mint_pro">薄荷专业</option>
+        <option value="dark_graph">深色图表</option>
+      </select>
+      <input id="host" value="172.16.41.13" placeholder="Host" />
+      <input id="port" value="6667" placeholder="Port" />
+      <input id="username" value="root" placeholder="Username" />
+      <input id="password" value="root" placeholder="Password" type="password" />
+      <button id="loadTreeBtn">加载树</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel tree">
+      <h2>树浏览</h2>
+      <div class="toolbar">
+        <input id="treeFilter" placeholder="搜索设备/路径关键词" />
+      </div>
+      <div id="tree"></div>
+    </section>
+    <div id="splitter" title="拖拽调整左右宽度"></div>
+
+    <section class="panel query">
+      <h2>查询构建</h2>
+      <section id="resultPane" class="result-pane">
+        <div class="result-head">
+          <div class="result-title">查询结果</div>
+          <div class="tabs">
+            <button id="tabTable" class="tab active">Table</button>
+            <button id="tabTrend" class="tab">Trend</button>
+          </div>
+          <div id="trendTools" class="trend-tools hidden">
+            <label>样式</label>
+            <select id="trendMode">
+              <option value="line" selected>折线</option>
+              <option value="step">直角折线</option>
+            </select>
+            <button id="trendReset" class="tab">重置缩放</button>
+          </div>
+        </div>
+        <div id="resultTableWrap" class="table-wrap">
+          <table id="result"></table>
+        </div>
+        <div id="resultTrendWrap" class="trend-wrap hidden">
+          <svg id="trendSvg" viewBox="0 0 1000 360" preserveAspectRatio="none"></svg>
+          <div id="trendTip" class="trend-tip hidden"></div>
+        </div>
+      </section>
+      <div id="hsplitter" title="拖拽调整结果区高度"></div>
+
+      <div class="row">
+        <label>设备</label>
+        <input id="device" readonly />
+      </div>
+      <div class="row">
+        <label>点位</label>
+        <input id="pointFilter" placeholder="搜索点位" />
+      </div>
+      <div class="row">
+        <label>已选</label>
+        <div id="pointStat" class="muted">0 / 0</div>
+        <button id="clearPointsBtn" type="button">取消全部</button>
+      </div>
+      <div class="row row-points">
+        <label></label>
+        <div id="points"></div>
+      </div>
+      <div class="query-card">
+        <div class="row grid">
+          <div class="field">
+            <span>聚合函数</span>
+            <select id="agg">
+              <option value="raw">raw</option>
+              <option value="mean" selected>mean</option>
+              <option value="max">max</option>
+              <option value="min">min</option>
+              <option value="sum">sum</option>
+              <option value="count">count</option>
+              <option value="first">first</option>
+              <option value="last">last</option>
+            </select>
+          </div>
+          <div class="field">
+            <span>时间范围</span>
+            <select id="range">
+              <option value="15m">最近15分钟</option>
+              <option value="1h">最近1小时</option>
+              <option value="6h">最近6小时</option>
+              <option value="24h" selected>最近24小时</option>
+              <option value="7d">最近7天</option>
+              <option value="custom">自定义</option>
+            </select>
+          </div>
+          <div class="field">
+            <span>Group Interval</span>
+            <input id="interval" value="15m" placeholder="15m/1h/1d" />
+          </div>
+          <div class="field">
+            <span>Sliding Step</span>
+            <input id="sliding" value="" placeholder="可选, 默认等于interval" />
+          </div>
+          <div class="field">
+            <span>Fill</span>
+            <select id="fill">
+              <option value="none">none</option>
+              <option value="null" selected>null</option>
+              <option value="previous">previous</option>
+              <option value="linear">linear</option>
+              <option value="0">0</option>
+            </select>
+          </div>
+          <div class="field">
+            <span>排序</span>
+            <select id="order">
+              <option value="DESC" selected>DESC</option>
+              <option value="ASC">ASC</option>
+            </select>
+          </div>
+          <div class="field">
+            <span>Limit</span>
+            <input id="limit" type="number" value="1000" min="1" />
+          </div>
+          <div class="field">
+            <span>Group Level</span>
+            <input id="level" type="number" min="1" placeholder="可选: 1/2/3..." />
+          </div>
+        </div>
+        <div class="row grid-2">
+          <div class="field">
+            <span>开始时间(自定义)</span>
+            <input id="startTime" type="datetime-local" />
+          </div>
+          <div class="field">
+            <span>结束时间(自定义)</span>
+            <input id="endTime" type="datetime-local" />
+          </div>
+        </div>
+        <div class="row chk-row">
+          <label class="chk"><input id="enableGroup" type="checkbox" checked /> 启用 GROUP BY</label>
+          <label class="chk"><input id="alignByDevice" type="checkbox" /> ALIGN BY DEVICE</label>
+          <label class="chk"><input id="withoutNull" type="checkbox" /> WITHOUT NULL ANY</label>
+        </div>
+      </div>
+      <div class="row">
+        <button id="buildBtn">生成SQL</button>
+        <button id="runBtn">执行SQL</button>
+      </div>
+      <div id="msg"></div>
+      <textarea id="sql" rows="8"></textarea>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
