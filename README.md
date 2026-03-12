@@ -1,43 +1,64 @@
-﻿# IoTDB Lite Viewer (原生 6667 版)
+﻿# iotdbviewlite
 
-这个版本走 IoTDB 原生 Python 接口，不依赖 IoTDB REST 服务。
+基于 IoTDB 原生 Python Session (`apache-iotdb`) 的轻量查询工具仓库，当前包含两种运行方式：
 
-- 后端：Flask
-- 前端：原生 HTML/CSS/JS
-- 连接协议：`apache-iotdb Session`（`host:port`，默认 `172.16.41.13:6667`）
+- Streamlit 版（`app.py`）
+- Flask Lite 版（`lite_app.py` + `templates/` + `static/`）
 
-## 1. 安装依赖
+两者都直接连接 IoTDB `host:port`（默认 `172.16.41.13:6667`），不依赖 REST 服务。
+
+## 环境
+
+- Python: `3.12`（按现有脚本路径）
+- 默认账号: `root/root`
+
+## 安装依赖
+
+### Streamlit 版
+
+```powershell
+& 'C:\Users\neigh\AppData\Local\Programs\Python\Python312\python.exe' -m pip install -r requirements.txt
+```
+
+### Flask Lite 版
 
 ```powershell
 & 'C:\Users\neigh\AppData\Local\Programs\Python\Python312\python.exe' -m pip install -r requirements-lite.txt
 ```
 
-## 2. 启动
+## 启动方式
+
+### 1) Streamlit 版
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+```
+
+默认地址通常为：`http://127.0.0.1:8501`
+
+### 2) Flask Lite 版
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run_lite.ps1
 ```
 
-浏览器打开：`http://127.0.0.1:7860`
+默认地址：`http://127.0.0.1:7860`
 
-## 3. 默认连接
+## 主要功能（当前实现）
 
-- Host: `172.16.41.13`
-- Port: `6667`
-- Username: `root`
-- Password: `root`
+- 浏览数据库与设备树（Database -> Device）
+- 按设备加载点位（Timeseries）
+- SQL 预制构建（时间范围、聚合、interval、fill、排序、limit）
+- 支持手工编辑 SQL
+- 查询结果表格展示
+- Streamlit 版支持结果折线图
 
-## 4. 功能
+## 关键文件
 
-- 左侧树：Database -> Device
-- 设备点位加载与勾选
-- 预制 SQL 构建：时间范围、聚合、interval、fill、排序、limit
-- SQL 手动编辑
-- 执行 SQL，展示结果表格
-
-## 5. 文件
-
-- 入口：[lite_app.py](./lite_app.py)
-- 页面：[templates/index.html](./templates/index.html)
-- 脚本：[static/app.js](./static/app.js)
-- 样式：[static/style.css](./static/style.css)
+- Streamlit 入口：`app.py`
+- Streamlit 启动兼容层：`streamlit_launcher.py`
+- Flask Lite 入口：`lite_app.py`
+- Lite 页面模板：`templates/index.html`
+- Lite 前端脚本：`static/app.js`
+- Lite 样式：`static/style.css`
+- 启动脚本：`run.ps1`、`run_lite.ps1`
