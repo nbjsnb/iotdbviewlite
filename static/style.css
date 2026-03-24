@@ -1,12 +1,32 @@
-﻿:root {
+:root {
   --bg: #f3f6f7;
   --bg-grad-a: #ecf4f7;
   --bg-grad-b: #f7f9fb;
   --panel: #ffffff;
+  --panel-soft: #f8fbfd;
+  --panel-strong: #fbfdff;
   --line: #d9e1e5;
   --text: #1f2a30;
   --muted: #61717a;
   --accent: #0b84a5;
+  --accent-soft: rgba(11, 132, 165, 0.16);
+  --splitter-a: #e8eef2;
+  --splitter-b: #dce6ed;
+  --splitter-hover-a: #d2e2ee;
+  --splitter-hover-b: #c7d9e7;
+  --tab-bg: #eef3f7;
+  --tab-text: #31434d;
+  --tab-line: #c8d6df;
+  --tree-hover: #eef5f9;
+  --tree-leaf: #1d4756;
+  --tree-active: #d9edf8;
+  --trend-bg: #ffffff;
+  --trend-axis: #8aa0ad;
+  --trend-grid: #edf2f6;
+  --trend-label: #5d727d;
+  --trend-tip-bg: rgba(16, 25, 31, 0.92);
+  --trend-tip-text: #f3f8fb;
+  --trend-tip-line: #2d4450;
   --btn-text: #ffffff;
   --tree-w: 460px;
   --result-h: 260px;
@@ -63,9 +83,9 @@ main {
 #splitter {
   cursor: col-resize;
   border-radius: 8px;
-  background: linear-gradient(180deg, #e8eef2, #dce6ed);
+  background: linear-gradient(180deg, var(--splitter-a), var(--splitter-b));
 }
-#splitter:hover { background: linear-gradient(180deg, #d2e2ee, #c7d9e7); }
+#splitter:hover { background: linear-gradient(180deg, var(--splitter-hover-a), var(--splitter-hover-b)); }
 .panel h2 { margin-top: 0; margin-bottom: 6px; font-size: 14px; }
 .result-pane {
   border: 1px solid var(--line);
@@ -75,7 +95,7 @@ main {
   display: flex;
   flex-direction: column;
   margin-bottom: 6px;
-  background: #fbfdff;
+  background: var(--panel-strong);
 }
 .result-head {
   display: flex;
@@ -85,9 +105,9 @@ main {
 }
 .tabs { display: flex; gap: 4px; }
 .tab {
-  background: #eef3f7;
-  color: #31434d;
-  border: 1px solid #c8d6df;
+  background: var(--tab-bg);
+  color: var(--tab-text);
+  border: 1px solid var(--tab-line);
   padding: 2px 8px;
 }
 .tab.active {
@@ -102,9 +122,9 @@ main {
   cursor: row-resize;
   border-radius: 6px;
   margin-bottom: 6px;
-  background: linear-gradient(180deg, #e8eef2, #dce6ed);
+  background: linear-gradient(180deg, var(--splitter-a), var(--splitter-b));
 }
-#hsplitter:hover { background: linear-gradient(180deg, #d2e2ee, #c7d9e7); }
+#hsplitter:hover { background: linear-gradient(180deg, var(--splitter-hover-a), var(--splitter-hover-b)); }
 .row { margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
 .row label { width: 54px; color: var(--muted); }
 .row-points { align-items: flex-start; }
@@ -126,7 +146,7 @@ main {
   border-radius: 6px;
   padding: 6px;
   margin-bottom: 6px;
-  background: #f8fbfd;
+  background: var(--panel-soft);
 }
 .field { display: flex; flex-direction: column; gap: 3px; }
 .field span { color: var(--muted); font-size: 11px; }
@@ -148,19 +168,19 @@ main {
   text-overflow: ellipsis;
 }
 #tree summary::-webkit-details-marker { display: none; }
-#tree summary:hover { background: #eef5f9; }
+#tree summary:hover { background: var(--tree-hover); }
 .tree-node { margin-left: 14px; }
 .tree-leaf {
   display: block;
   margin: 2px 0 2px 14px;
-  color: #1d4756;
+  color: var(--tree-leaf);
   cursor: pointer;
   padding: 2px 4px;
   border-radius: 4px;
   word-break: break-all;
 }
-.tree-leaf:hover { background: #eef5f9; }
-.tree-leaf.active { background: #d9edf8; font-weight: 600; }
+.tree-leaf:hover { background: var(--tree-hover); }
+.tree-leaf.active { background: var(--tree-active); font-weight: 600; }
 #points {
   display: grid;
   grid-template-columns: 1fr;
@@ -211,16 +231,16 @@ main {
   border-radius: 6px;
   overflow: hidden;
 }
-#trendSvg { width: 100%; height: 100%; display: block; background: #fff; }
+#trendSvg { width: 100%; height: 100%; display: block; background: var(--trend-bg); }
 .trend-tip {
   position: absolute;
   pointer-events: none;
   z-index: 5;
   min-width: 140px;
   max-width: 320px;
-  background: rgba(16, 25, 31, 0.92);
-  color: #f3f8fb;
-  border: 1px solid #2d4450;
+  background: var(--trend-tip-bg);
+  color: var(--trend-tip-text);
+  border: 1px solid var(--trend-tip-line);
   border-radius: 4px;
   padding: 6px 8px;
   font-size: 11px;
@@ -237,3 +257,4 @@ th, td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: lef
   #points { grid-template-columns: 1fr; }
   .trend-tools { margin-left: 0; }
 }
+

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import os
 import sys
 from typing import Any, Callable
@@ -23,6 +24,7 @@ app = Flask(
     template_folder=os.path.join(_BASE_DIR, "templates"),
     static_folder=os.path.join(_BASE_DIR, "static"),
 )
+APP_VERSION = "0.1.1"
 
 
 @dataclass
@@ -46,6 +48,50 @@ def _dataset_to_table(ds: Any) -> dict[str, Any]:
     if not col_names:
         col_names = ["Time", "Value"]
 
+    # Prefer dataframe conversion to avoid potential field-order mismatch.
+    todf_op = _find_op(ds, ["todf"])
+    if todf_op:
+        try:
+            df = todf_op()
+            if df is not None:
+                df_cols = [str(c) for c in list(df.columns)]
+                out_cols = list(df_cols)
+                if col_names:
+                    # Align df column order to server column names with normalized matching.
+                    wanted = [str(c) for c in col_names]
+                    if len(wanted) == len(df_cols):
+                        used = set()
+                        idxs: list[int] = []
+                        ok = True
+                        for w in wanted:
+                            wi = _normalize_col_name(w)
+                            found = -1
+                            for i, c in enumerate(df_cols):
+                                if i in used:
+                                    continue
+                                if _normalize_col_name(c) == wi:
+                                    found = i
+                                    break
+                            if found < 0:
+                                ok = False
+                                break
+                            used.add(found)
+                            idxs.append(found)
+                        if ok and len(idxs) == len(df_cols):
+                            df = df.iloc[:, idxs]
+                            out_cols = wanted
+
+                rows: list[list[Any]] = []
+                for rec in df.itertuples(index=False, name=None):
+                    row = [_to_json_cell(v) for v in rec]
+                    if len(row) < len(out_cols):
+                        row.extend([None] * (len(out_cols) - len(row)))
+                    rows.append(row[: len(out_cols)])
+                return {"columns": out_cols, "rows": rows}
+        except Exception:
+            # Keep compatibility with old driver behavior.
+            pass
+
     has_next = _find_op(ds, ["has_next", "hasNext"])
     next_row = _find_op(ds, ["next"])
     if not has_next or not next_row:
@@ -65,7 +111,7 @@ def _dataset_to_table(ds: Any) -> dict[str, Any]:
                 vals.append(None)
                 continue
             s_get = _find_op(f, ["get_string_value", "getStringValue"])
-            vals.append(s_get() if s_get else str(f))
+            vals.append(_to_json_cell(s_get() if s_get else str(f)))
 
         # Metadata statements (SHOW ...) often don't include a time column.
         if len(col_names) == len(vals):
@@ -78,6 +124,30 @@ def _dataset_to_table(ds: Any) -> dict[str, Any]:
 
     return {"columns": col_names, "rows": rows}
 
+
+def _to_json_cell(v: Any) -> Any:
+    if v is None:
+        return None
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            return bytes(v).decode("utf-8")
+        except Exception:
+            return bytes(v).hex()
+    if hasattr(v, "item"):
+        try:
+            v = v.item()
+        except Exception:
+            pass
+    try:
+        if math.isnan(v):  # type: ignore[arg-type]
+            return None
+    except Exception:
+        pass
+    return v
+
+
+def _normalize_col_name(name: str) -> str:
+    return str(name).strip().strip("`").strip('"').lower()
 
 def _first_text_cell(row: list[Any]) -> str:
     for v in row:
@@ -115,7 +185,7 @@ def _query(conn: Conn, sql: str) -> dict[str, Any]:
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", app_version=APP_VERSION)
 
 
 @app.post("/api/query")
@@ -209,3 +279,4 @@ def api_points():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7860, debug=False, use_reloader=False)
+

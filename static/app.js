@@ -20,10 +20,31 @@ const themes = {
     "--bg-grad-a": "#ecf4f7",
     "--bg-grad-b": "#f7f9fb",
     "--panel": "#ffffff",
+    "--panel-soft": "#f8fbfd",
+    "--panel-strong": "#fbfdff",
     "--line": "#d9e1e5",
     "--text": "#1f2a30",
     "--muted": "#61717a",
     "--accent": "#0b84a5",
+    "--accent-soft": "rgba(11,132,165,0.16)",
+    "--splitter-a": "#e8eef2",
+    "--splitter-b": "#dce6ed",
+    "--splitter-hover-a": "#d2e2ee",
+    "--splitter-hover-b": "#c7d9e7",
+    "--tab-bg": "#eef3f7",
+    "--tab-text": "#31434d",
+    "--tab-line": "#c8d6df",
+    "--tree-hover": "#eef5f9",
+    "--tree-leaf": "#1d4756",
+    "--tree-active": "#d9edf8",
+    "--trend-bg": "#ffffff",
+    "--trend-axis": "#8aa0ad",
+    "--trend-grid": "#edf2f6",
+    "--trend-label": "#5d727d",
+    "--trend-tip-bg": "rgba(16,25,31,0.92)",
+    "--trend-tip-text": "#f3f8fb",
+    "--trend-tip-line": "#2d4450",
+    "--series-colors": "#0b84a5,#f6a021,#35a35d,#db3a34,#7453e8,#2f6fdd",
     "--btn-text": "#ffffff",
   },
   light_clean: {
@@ -47,21 +68,51 @@ const themes = {
     "--btn-text": "#ffffff",
   },
   dark_graph: {
-    "--bg-grad-a": "#1b1f24",
-    "--bg-grad-b": "#111418",
-    "--panel": "#1f252c",
-    "--line": "#3a4652",
-    "--text": "#e5edf4",
-    "--muted": "#9db0bf",
-    "--accent": "#2e9ad1",
-    "--btn-text": "#f4f8fb",
+    "--bg-grad-a": "#0f1722",
+    "--bg-grad-b": "#0a111a",
+    "--panel": "#131b26",
+    "--panel-soft": "#111a24",
+    "--panel-strong": "#0f1823",
+    "--line": "#223447",
+    "--text": "#e6eef8",
+    "--muted": "#8ca3b8",
+    "--accent": "#22adf6",
+    "--accent-soft": "rgba(34,173,246,0.2)",
+    "--splitter-a": "#182838",
+    "--splitter-b": "#132231",
+    "--splitter-hover-a": "#1e3347",
+    "--splitter-hover-b": "#193044",
+    "--tab-bg": "#152334",
+    "--tab-text": "#aac2d6",
+    "--tab-line": "#25405a",
+    "--tree-hover": "#17314a",
+    "--tree-leaf": "#48b6df",
+    "--tree-active": "#1b3d59",
+    "--trend-bg": "#0e1823",
+    "--trend-axis": "#5f7990",
+    "--trend-grid": "#1b2a3a",
+    "--trend-label": "#8da3b6",
+    "--trend-tip-bg": "rgba(6,12,18,0.95)",
+    "--trend-tip-text": "#d8e8f6",
+    "--trend-tip-line": "#27445f",
+    "--series-colors": "#00c9ff,#34d399,#fbbf24,#fb7185,#a78bfa,#60a5fa",
+    "--btn-text": "#eaf6ff",
   },
 };
 
+const themeVars = [...new Set(Object.values(themes).flatMap((cfg) => Object.keys(cfg)))];
+
+function cssVar(name, fallback = "") {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
 function applyTheme(name) {
   const t = themes[name] || themes.compact_blue;
-  Object.entries(t).forEach(([k, v]) => {
-    document.documentElement.style.setProperty(k, v);
+  themeVars.forEach((k) => {
+    const v = t[k] ?? themes.compact_blue[k] ?? "";
+    if (v) document.documentElement.style.setProperty(k, v);
+    else document.documentElement.style.removeProperty(k);
   });
   localStorage.setItem("iotdb_theme", name);
 }
@@ -92,6 +143,62 @@ function deltaMs(v) {
 }
 
 function quoteIdent(name) { return "`" + name.replace(/`/g, "``") + "`"; }
+function normalizeColName(name) {
+  return String(name || "").trim().replace(/^`|`$/g, "").replace(/^"|"$/g, "").toLowerCase();
+}
+function sortPointsByNaturalOrder(points) {
+  const idx = new Map(allPoints.map((p, i) => [p, i]));
+  return [...points].sort((a, b) => {
+    const ia = idx.has(a) ? idx.get(a) : Number.MAX_SAFE_INTEGER;
+    const ib = idx.has(b) ? idx.get(b) : Number.MAX_SAFE_INTEGER;
+    if (ia !== ib) return ia - ib;
+    return String(a).localeCompare(String(b));
+  });
+}
+function desiredMetricColumnsBySelection() {
+  const selected = [...selectedPoints];
+  const agg = $("agg").value;
+  const enableGroup = $("enableGroup").checked;
+  if (agg === "raw" || !enableGroup) return selected;
+  return selected.map((p) => `${agg}_${p}`);
+}
+function reorderResultByDesiredColumns(columns, rows, desiredMetricCols) {
+  const cols = [...(columns || [])];
+  const rs = rows || [];
+  const desired = desiredMetricCols || [];
+  if (!cols.length || !desired.length) return { columns: cols, rows: rs };
+
+  const timeIdx = [];
+  const metricIdx = [];
+  cols.forEach((c, i) => {
+    const n = normalizeColName(c);
+    if (n === "time" || n.includes("timestamp")) timeIdx.push(i);
+    else metricIdx.push(i);
+  });
+  if (!metricIdx.length) return { columns: cols, rows: rs };
+
+  const buckets = new Map();
+  metricIdx.forEach((i) => {
+    const key = normalizeColName(cols[i]);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(i);
+  });
+
+  const picked = [];
+  for (const d of desired) {
+    const key = normalizeColName(d);
+    const arr = buckets.get(key);
+    if (!arr || !arr.length) return { columns: cols, rows: rs };
+    picked.push(arr.shift());
+  }
+  const remain = [];
+  buckets.forEach((arr) => arr.forEach((i) => remain.push(i)));
+  const order = [...timeIdx, ...picked, ...remain];
+
+  const newCols = order.map((i) => cols[i]);
+  const newRows = rs.map((r) => order.map((i) => (r && i < r.length ? r[i] : null)));
+  return { columns: newCols, rows: newRows };
+}
 
 function resolveTimeRange() {
   const mode = $("range").value;
@@ -108,6 +215,7 @@ function resolveTimeRange() {
 function buildSql() {
   const device = $("device").value.trim();
   const points = [...selectedPoints];
+  const queryPoints = sortPointsByNaturalOrder(points);
   const agg = $("agg").value;
   const interval = $("interval").value.trim();
   const sliding = $("sliding").value.trim();
@@ -128,7 +236,7 @@ function buildSql() {
 
   const where = `time >= ${start} AND time <= ${end}`;
   if (agg === "raw" || !enableGroup) {
-    const fields = points.map(quoteIdent).join(", ");
+    const fields = queryPoints.map(quoteIdent).join(", ");
     let sql = `SELECT ${fields} FROM ${device} WHERE ${where} ORDER BY TIME ${order} LIMIT ${limit}`;
     if (alignByDevice) sql += " ALIGN BY DEVICE";
     if (withoutNull) sql += " WITHOUT NULL ANY";
@@ -140,7 +248,7 @@ function buildSql() {
     count: "COUNT", first: "FIRST_VALUE", last: "LAST_VALUE",
   };
   const fn = fnMap[agg] || "AVG";
-  const fields = points.map((p) => `${fn}(${quoteIdent(p)}) AS ${quoteIdent(agg + "_" + p)}`).join(", ");
+  const fields = queryPoints.map((p) => `${fn}(${quoteIdent(p)}) AS ${quoteIdent(agg + "_" + p)}`).join(", ");
   const fillMap = { none: "", null: "", previous: " FILL(PREVIOUS)", linear: " FILL(LINEAR)", "0": " FILL(0)" };
 
   let group = `GROUP BY ([${start}, ${end}), ${interval || "15m"})`;
@@ -505,7 +613,7 @@ function renderTrend() {
     if (sample > 0 && ok / sample > 0.5) seriesIdx.push(i);
   }
   if (!seriesIdx.length) {
-    svg.innerHTML = "<text x='20' y='30' fill='#6b7d86' font-size='12'>未找到数值列，无法绘图</text>";
+    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>未找到数值列，无法绘图</text>`;
     trendRenderCtx = null;
     return;
   }
@@ -522,7 +630,7 @@ function renderTrend() {
     data.push({ t, vals });
   });
   if (!data.length) {
-    svg.innerHTML = "<text x='20' y='30' fill='#6b7d86' font-size='12'>数据为空</text>";
+    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>数据为空</text>`;
     trendRenderCtx = null;
     return;
   }
@@ -570,7 +678,7 @@ function renderTrend() {
     });
   });
   if (!Number.isFinite(ymin) || !Number.isFinite(ymax)) {
-    svg.innerHTML = "<text x='20' y='30' fill='#6b7d86' font-size='12'>数值为空</text>";
+    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>数值为空</text>`;
     trendRenderCtx = null;
     return;
   }
@@ -578,11 +686,18 @@ function renderTrend() {
 
   const x = (t) => pad.l + ((t - xmin) / Math.max(1, xmax - xmin)) * pw;
   const y = (v) => pad.t + (1 - (v - ymin) / (ymax - ymin)) * ph;
+  const axisColor = cssVar("--trend-axis", "#8aa0ad");
+  const gridColor = cssVar("--trend-grid", "#edf2f6");
+  const labelColor = cssVar("--trend-label", "#5d727d");
+  const seriesColors = cssVar("--series-colors", "#0b84a5,#f6a021,#35a35d,#db3a34,#7453e8,#2f6fdd")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   const mk = (tag) => document.createElementNS("http://www.w3.org/2000/svg", tag);
   const axis = mk("path");
   axis.setAttribute("d", `M${pad.l},${pad.t} L${pad.l},${H - pad.b} L${W - pad.r},${H - pad.b}`);
-  axis.setAttribute("stroke", "#8aa0ad");
+  axis.setAttribute("stroke", axisColor);
   axis.setAttribute("fill", "none");
   axis.setAttribute("stroke-width", "1");
   svg.appendChild(axis);
@@ -598,7 +713,7 @@ function renderTrend() {
     g.setAttribute("x2", String(tx));
     g.setAttribute("y1", String(pad.t));
     g.setAttribute("y2", String(H - pad.b));
-    g.setAttribute("stroke", "#edf2f6");
+    g.setAttribute("stroke", gridColor);
     g.setAttribute("stroke-width", "1");
     svg.appendChild(g);
 
@@ -607,20 +722,19 @@ function renderTrend() {
     tk.setAttribute("x2", String(tx));
     tk.setAttribute("y1", String(H - pad.b));
     tk.setAttribute("y2", String(H - pad.b + 4));
-    tk.setAttribute("stroke", "#8aa0ad");
+    tk.setAttribute("stroke", axisColor);
     tk.setAttribute("stroke-width", "1");
     svg.appendChild(tk);
 
     const txt = mk("text");
     txt.setAttribute("x", String(tx - 22));
     txt.setAttribute("y", String(H - 6));
-    txt.setAttribute("fill", "#5d727d");
+    txt.setAttribute("fill", labelColor);
     txt.setAttribute("font-size", "10");
     txt.textContent = fmtTime(t, span);
     svg.appendChild(txt);
   }
 
-  const colors = ["#0b84a5", "#f6a021", "#35a35d", "#db3a34", "#7453e8", "#2f6fdd"];
   const mode = $("trendMode").value;
   seriesIdx.forEach((idx, sidx) => {
     let dstr = "";
@@ -639,7 +753,7 @@ function renderTrend() {
     const p = mk("path");
     p.setAttribute("d", dstr);
     p.setAttribute("fill", "none");
-    p.setAttribute("stroke", colors[sidx % colors.length]);
+    p.setAttribute("stroke", seriesColors[sidx % seriesColors.length]);
     p.setAttribute("stroke-width", "1.6");
     svg.appendChild(p);
   });
@@ -647,7 +761,7 @@ function renderTrend() {
   const yTop = mk("text");
   yTop.setAttribute("x", "4");
   yTop.setAttribute("y", String(pad.t + 8));
-  yTop.setAttribute("fill", "#5d727d");
+  yTop.setAttribute("fill", labelColor);
   yTop.setAttribute("font-size", "11");
   yTop.textContent = ymax.toFixed(3);
   svg.appendChild(yTop);
@@ -655,7 +769,7 @@ function renderTrend() {
   const yBottom = mk("text");
   yBottom.setAttribute("x", "4");
   yBottom.setAttribute("y", String(H - pad.b));
-  yBottom.setAttribute("fill", "#5d727d");
+  yBottom.setAttribute("fill", labelColor);
   yBottom.setAttribute("font-size", "11");
   yBottom.textContent = ymin.toFixed(3);
   svg.appendChild(yBottom);
@@ -685,8 +799,8 @@ function setTrendOverlay(x1, x2) {
     rect.setAttribute("id", "trendBrush");
     rect.setAttribute("y", "0");
     rect.setAttribute("height", "360");
-    rect.setAttribute("fill", "rgba(11,132,165,0.18)");
-    rect.setAttribute("stroke", "#0b84a5");
+    rect.setAttribute("fill", cssVar("--accent-soft", "rgba(11,132,165,0.18)"));
+    rect.setAttribute("stroke", cssVar("--accent", "#0b84a5"));
     rect.setAttribute("stroke-width", "1");
     svg.appendChild(rect);
   }
@@ -709,7 +823,7 @@ function setTrendCursor(x) {
     line.setAttribute("id", "trendCursor");
     line.setAttribute("y1", "0");
     line.setAttribute("y2", "360");
-    line.setAttribute("stroke", "#0b84a5");
+    line.setAttribute("stroke", cssVar("--accent", "#0b84a5"));
     line.setAttribute("stroke-width", "1");
     line.setAttribute("stroke-dasharray", "4 3");
     svg.appendChild(line);
@@ -924,7 +1038,12 @@ $("runBtn").onclick = async () => {
     const sql = $("sql").value.trim();
     const data = await postJson("/api/query", { ...connPayload(), sql });
     lastQueryWindow = parseQueryWindow(sql);
-    renderResult(data.columns || [], data.rows || []);
+    const ordered = reorderResultByDesiredColumns(
+      data.columns || [],
+      data.rows || [],
+      desiredMetricColumnsBySelection(),
+    );
+    renderResult(ordered.columns, ordered.rows);
     setMsg(`执行完成，返回 ${data.rows ? data.rows.length : 0} 行`, "ok");
   } catch (e) {
     setMsg(e.message, "err");
