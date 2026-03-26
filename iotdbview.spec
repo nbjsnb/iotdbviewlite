@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['lite_app.py'],
+    ['iotdbviewlite.py'],
     pathex=[],
     binaries=[],
     datas=[('templates', 'templates'), ('static', 'static')],
