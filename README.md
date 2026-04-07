@@ -19,7 +19,9 @@
 ## 安装依赖
 
 ```powershell
-& 'C:\Users\neigh\AppData\Local\Programs\Python\Python312\python.exe' -m pip install -r requirements-lite.txt
+python -m pip install -r requirements-lite.txt
+# or
+py -3 -m pip install -r requirements-lite.txt
 ```
 
 ## 启动方式
