@@ -2,6 +2,15 @@
 
 let treeData = {};
 let allPoints = [];
+let pointTypes = {};
+let pointPaths = {};
+let openPointMenuEl = null;
+let pointsPage = 1;
+let pointsPageSize = 1000;
+let pointsTotal = 0;
+let pointsTotalPages = 1;
+let pointsKeyword = "";
+let pointsReqSeq = 0;
 let selectedDevice = "";
 let selectedPoints = new Set();
 let lastResult = { columns: [], rows: [] };
@@ -14,6 +23,13 @@ let trendState = {
 };
 let trendRenderCtx = null;
 let lastQueryWindow = null;
+let rightView = "query";
+let currentInfoPath = "";
+let currentInfoMode = "database";
+let currentDbInfo = null;
+let currentPointInfo = null;
+let consoleMode = false;
+let iotdbVersion = "";
 
 const themes = {
   compact_blue: {
@@ -45,6 +61,9 @@ const themes = {
     "--trend-tip-text": "#f3f8fb",
     "--trend-tip-line": "#2d4450",
     "--series-colors": "#0b84a5,#f6a021,#35a35d,#db3a34,#7453e8,#2f6fdd",
+    "--scroll-track": "#e7edf2",
+    "--scroll-thumb": "#b7c5d0",
+    "--scroll-thumb-hover": "#9fb0bc",
     "--btn-text": "#ffffff",
   },
   light_clean: {
@@ -96,6 +115,9 @@ const themes = {
     "--trend-tip-text": "#d8e8f6",
     "--trend-tip-line": "#27445f",
     "--series-colors": "#00c9ff,#34d399,#fbbf24,#fb7185,#a78bfa,#60a5fa",
+    "--scroll-track": "#0e1a27",
+    "--scroll-thumb": "#2b4054",
+    "--scroll-thumb-hover": "#36536d",
     "--btn-text": "#eaf6ff",
   },
 };
@@ -124,6 +146,313 @@ function setMsg(text, type = "info") {
   el.classList.add(`msg-${type}`);
 }
 
+function setDbInfoMsg(text, type = "info") {
+  const el = $("dbInfoMsg");
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = "";
+  el.classList.add(`msg-${type}`);
+}
+
+function parseVersionMajor(ver) {
+  const m = String(ver || "").match(/(\d+)\./);
+  if (!m) return null;
+  return Number(m[1]);
+}
+
+function updateTtlCompatHint() {
+  const el = $("ttlCompatHint");
+  if (!el) return;
+  const major = parseVersionMajor(iotdbVersion);
+
+  if (currentInfoMode === "device") {
+    if (major != null && major < 2) {
+      el.textContent = "Note: IoTDB < 2.0 may not support device-level TTL strictly. Rule may fallback to upper path/database.";
+    } else {
+      el.textContent = "Device-level TTL is expected to work on IoTDB 2.0+; verify with SHOW ALL TTL after apply.";
+    }
+    return;
+  }
+
+  if (currentInfoMode === "path") {
+    el.textContent = "Path-level TTL support varies by version/deployment. Verify effective scope with SHOW ALL TTL.";
+    return;
+  }
+
+  if (currentInfoMode === "point") {
+    el.textContent = "Point TTL is inherited from upper path/device/database in most versions.";
+    return;
+  }
+
+  el.textContent = "Database-level TTL is generally stable across versions.";
+}
+async function fetchServerVersion() {
+  try {
+    const data = await postJson("/api/version", connPayload());
+    iotdbVersion = data.version || "";
+    $("serverVersion").textContent = `IoTDB: ${data.version || "unknown"}`;
+    updateTtlCompatHint();
+  } catch (_) {
+    iotdbVersion = "";
+    $("serverVersion").textContent = "IoTDB: unavailable";
+    updateTtlCompatHint();
+  }
+}
+
+function setConsoleMode(on) {
+  consoleMode = !!on;
+  const panel = $("builderPanel");
+  if (panel) panel.classList.toggle("hidden", consoleMode);
+  const btn = $("toggleConsoleBtn");
+  if (btn) btn.textContent = consoleMode ? "Console: ON" : "Console: OFF";
+  const buildBtn = $("buildBtn");
+  if (buildBtn) buildBtn.disabled = consoleMode;
+}
+function switchRightView(view) {
+  rightView = view === "dbinfo" ? "dbinfo" : "query";
+  const q = $("queryView");
+  const d = $("dbInfoView");
+  if (!q || !d) return;
+  if (rightView === "dbinfo") {
+    q.classList.add("hidden");
+    d.classList.remove("hidden");
+  } else {
+    d.classList.add("hidden");
+    q.classList.remove("hidden");
+  }
+}
+
+function fillList(listId, values) {
+  const ul = $(listId);
+  if (!ul) return;
+  ul.innerHTML = "";
+  const arr = values || [];
+  if (!arr.length) {
+    const li = document.createElement("li");
+    li.textContent = "(empty)";
+    ul.appendChild(li);
+    return;
+  }
+  arr.forEach((v) => {
+    const li = document.createElement("li");
+    li.textContent = String(v);
+    ul.appendChild(li);
+  });
+}
+
+function ttlMsToText(ttlMs) {
+  if (!Number.isFinite(Number(ttlMs)) || Number(ttlMs) <= 0) return "never expire";
+  const n = Number(ttlMs);
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (n % dayMs === 0) return `${Math.floor(n / dayMs)}d`;
+  return `${n} ms`;
+}
+
+function setInfoMode(mode) {
+  const m = mode === "point" ? "point" : (mode === "device" ? "device" : (mode === "path" ? "path" : "database"));
+  currentInfoMode = m;
+
+  if (m === "database") {
+    $("infoViewTitle").textContent = "Database Info";
+    $("infoLabelName").textContent = "Name";
+    $("infoLabelMetricA").textContent = "Devices";
+    $("infoLabelMetricB").textContent = "Timeseries";
+    $("infoListTitleA").textContent = "Sample Devices";
+    $("infoListTitleB").textContent = "Sample Timeseries";
+  } else if (m === "device") {
+    $("infoViewTitle").textContent = "Device Info";
+    $("infoLabelName").textContent = "Device";
+    $("infoLabelMetricA").textContent = "Database";
+    $("infoLabelMetricB").textContent = "Points";
+    $("infoListTitleA").textContent = "Sample Points";
+    $("infoListTitleB").textContent = "Path Notes";
+  } else if (m === "path") {
+    $("infoViewTitle").textContent = "Path Info";
+    $("infoLabelName").textContent = "Path";
+    $("infoLabelMetricA").textContent = "Devices";
+    $("infoLabelMetricB").textContent = "Timeseries";
+    $("infoListTitleA").textContent = "Child Paths";
+    $("infoListTitleB").textContent = "Sample Devices";
+  } else {
+    $("infoViewTitle").textContent = "Point Info";
+    $("infoLabelName").textContent = "Point";
+    $("infoLabelMetricA").textContent = "Device";
+    $("infoLabelMetricB").textContent = "Data Type";
+    $("infoListTitleA").textContent = "Meta";
+    $("infoListTitleB").textContent = "Notes";
+  }
+
+  $("infoLabelLastWrite").textContent = "Last Write Time";
+
+  const ttlCard = $("ttlSettingsCard");
+  const pointCard = $("pointActionCard");
+  if (ttlCard) ttlCard.classList.toggle("hidden", m === "point");
+  if (pointCard) pointCard.classList.toggle("hidden", m !== "point");
+
+  updateTtlCompatHint();
+}
+
+function renderDbInfo(info) {
+  currentDbInfo = info || null;
+  currentPointInfo = null;
+  currentInfoPath = info?.database || "";
+  setInfoMode("database");
+
+  $("dbInfoName").textContent = info?.database || "-";
+  $("dbInfoTtl").textContent = info?.ttl_text || ttlMsToText(info?.ttl_ms);
+  $("dbInfoDeviceCount").textContent = String(info?.device_count ?? "-");
+  $("dbInfoTsCount").textContent = String(info?.timeseries_count ?? "-");
+  $("dbInfoLastWrite").textContent = info?.last_write_text || "-";
+  fillList("dbSampleDevices", info?.sample_devices || []);
+  fillList("dbSampleTimeseries", info?.sample_timeseries || []);
+
+  const ttlMs = Number(info?.ttl_ms);
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (Number.isFinite(ttlMs) && ttlMs > 0 && ttlMs % dayMs === 0) {
+    const days = Math.floor(ttlMs / dayMs);
+    if ([7, 30, 90, 180, 365].includes(days)) {
+      $("dbTtlPreset").value = String(days);
+      $("dbTtlDays").value = String(days);
+    } else {
+      $("dbTtlPreset").value = "custom";
+      $("dbTtlDays").value = String(days);
+    }
+  } else {
+    $("dbTtlPreset").value = "never";
+  }
+}
+
+function renderDeviceInfo(info) {
+  currentPointInfo = null;
+  currentInfoPath = info?.device || "";
+  setInfoMode("device");
+
+  $("dbInfoName").textContent = info?.device || "-";
+  $("dbInfoTtl").textContent = info?.ttl_text || ttlMsToText(info?.ttl_ms);
+  $("dbInfoDeviceCount").textContent = info?.database || "-";
+  $("dbInfoTsCount").textContent = String(info?.point_count ?? "-");
+  $("dbInfoLastWrite").textContent = info?.last_write_text || "-";
+  fillList("dbSampleDevices", info?.sample_points || []);
+
+  const notes = [];
+  if (info?.ttl_source_path) {
+    if (info.ttl_source_path === info.device) notes.push(`TTL directly set on: ${info.ttl_source_path}`);
+    else notes.push(`TTL inherited from: ${info.ttl_source_path}`);
+  } else {
+    notes.push("TTL source: none (never expire)");
+  }
+  fillList("dbSampleTimeseries", notes);
+}
+
+function renderPathInfo(info) {
+  currentPointInfo = null;
+  currentInfoPath = info?.path || "";
+  setInfoMode("path");
+
+  $("dbInfoName").textContent = info?.path || "-";
+  $("dbInfoTtl").textContent = info?.ttl_text || ttlMsToText(info?.ttl_ms);
+  $("dbInfoDeviceCount").textContent = String(info?.device_count ?? "-");
+  $("dbInfoTsCount").textContent = String(info?.timeseries_count ?? "-");
+  $("dbInfoLastWrite").textContent = info?.last_write_text || "-";
+  fillList("dbSampleDevices", info?.child_paths || []);
+  fillList("dbSampleTimeseries", info?.sample_devices || []);
+
+  const ttlMs = Number(info?.ttl_ms);
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (Number.isFinite(ttlMs) && ttlMs > 0 && ttlMs % dayMs === 0) {
+    const days = Math.floor(ttlMs / dayMs);
+    if ([7, 30, 90, 180, 365].includes(days)) {
+      $("dbTtlPreset").value = String(days);
+      $("dbTtlDays").value = String(days);
+    } else {
+      $("dbTtlPreset").value = "custom";
+      $("dbTtlDays").value = String(days);
+    }
+  } else {
+    $("dbTtlPreset").value = "never";
+  }
+}
+
+async function openDbInfo(db) {
+  switchRightView("dbinfo");
+  setDbInfoMsg(`Loading database info: ${db} ...`, "info");
+  try {
+    const data = await postJson("/api/db_info", { ...connPayload(), database: db });
+    renderDbInfo(data);
+    setDbInfoMsg("Database info loaded", "ok");
+  } catch (e) {
+    setDbInfoMsg(e.message, "err");
+  }
+}
+
+async function openDeviceInfo(device) {
+  switchRightView("dbinfo");
+  setDbInfoMsg(`Loading device info: ${device} ...`, "info");
+  try {
+    const data = await postJson("/api/device_info", { ...connPayload(), device });
+    renderDeviceInfo(data);
+    setDbInfoMsg("Device info loaded", "ok");
+  } catch (e) {
+    setDbInfoMsg(e.message, "err");
+  }
+}
+
+async function openPathInfo(path) {
+  switchRightView("dbinfo");
+  setDbInfoMsg(`Loading path info: ${path} ...`, "info");
+  try {
+    const data = await postJson("/api/path_info", { ...connPayload(), path });
+    renderPathInfo(data);
+    setDbInfoMsg("Path info loaded", "ok");
+  } catch (e) {
+    setDbInfoMsg(e.message, "err");
+  }
+}
+function renderPointInfo(info) {
+  currentPointInfo = info || null;
+  currentInfoPath = info?.path || "";
+  setInfoMode("point");
+
+  $("dbInfoName").textContent = info?.path || "-";
+  $("dbInfoTtl").textContent = info?.ttl_text || ttlMsToText(info?.ttl_ms);
+  $("dbInfoDeviceCount").textContent = info?.device || "-";
+  $("dbInfoTsCount").textContent = info?.data_type || "UNKNOWN";
+  $("dbInfoLastWrite").textContent = info?.last_write_text || "-";
+
+  const meta = [];
+  if (info?.database) meta.push(`Database: ${info.database}`);
+  if (info?.encoding) meta.push(`Encoding: ${info.encoding}`);
+  if (info?.compressor) meta.push(`Compressor: ${info.compressor}`);
+  if (info?.alias) meta.push(`Alias: ${info.alias}`);
+  if (info?.last_value != null && String(info.last_value) !== "") meta.push(`Last Value: ${info.last_value}`);
+  if (info?.tags != null && String(info.tags) !== "") meta.push(`Tags: ${JSON.stringify(info.tags)}`);
+  if (info?.attributes != null && String(info.attributes) !== "") meta.push(`Attributes: ${JSON.stringify(info.attributes)}`);
+  fillList("dbSampleDevices", meta);
+
+  const notes = [];
+  if (info?.ttl_source_path) {
+    if (info.ttl_source_path === info.device) notes.push(`TTL directly set on: ${info.ttl_source_path}`);
+    else notes.push(`TTL inherited from: ${info.ttl_source_path}`);
+  } else {
+    notes.push("TTL source: none (never expire)");
+  }
+  fillList("dbSampleTimeseries", notes);
+
+  const retypeInput = $("pointRetypeInput");
+  if (retypeInput) retypeInput.value = info?.data_type || "FLOAT";
+}
+
+async function openPointInfo(path) {
+  switchRightView("dbinfo");
+  setDbInfoMsg(`Loading point info: ${path} ...`, "info");
+  try {
+    const data = await postJson("/api/point_info", { ...connPayload(), path });
+    renderPointInfo(data);
+    setDbInfoMsg("Point info loaded", "ok");
+  } catch (e) {
+    setDbInfoMsg(e.message, "err");
+  }
+}
 function connPayload() {
   return {
     host: $("host").value.trim(),
@@ -227,12 +556,13 @@ function buildSql() {
   const alignByDevice = $("alignByDevice").checked;
   const withoutNull = $("withoutNull").checked;
 
-  if (!device) return "-- 请选择设备";
-  if (!points.length) return "-- 请至少选择一个point";
+  if (!device) return "-- Please select a device";
+  if (!points.length) return "-- Please select at least one point";
 
   const [start, end] = resolveTimeRange();
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return "-- 自定义时间范围未填写完整";
-  if (end <= start) return "-- 结束时间必须大于开始时间";
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return "-- Custom time range is incomplete";
+  if (end <= start) return "-- End time must be greater than start time";
+
 
   const where = `time >= ${start} AND time <= ${end}`;
   if (agg === "raw" || !enableGroup) {
@@ -283,7 +613,7 @@ async function postJson(url, body) {
   const txt = await r.text();
   let data = {};
   try { data = txt ? JSON.parse(txt) : {}; }
-  catch (_) { throw new Error(`服务器返回非JSON: ${txt.slice(0, 180)}`); }
+  catch (_) { throw new Error(`闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣捣閻棗銆掑锝呬壕濡ょ姷鍋為悧鐘汇€侀弴銏℃櫆闁芥ê顦純鏇㈡⒒娴ｈ櫣銆婇柛鎾寸箞閹柉顦归柟顖氱焸楠炴绱掑Ο琛″亾閸偆绠鹃柟瀵稿剱娴煎棝鏌熸潏鍓х暠闁活厽顨婇悡顐﹀炊閵娧€濮囬梺缁樻尵閸犳牠寮婚敓鐘茬闁靛鍎崑鎾诲传閵夛附娈伴梺鍓插亝濞叉﹢鍩涢幒妤佺厱閻忕偠顕ч埀顒佹礋閹﹢鏁冮崒娑氬幐闁诲繒鍋熼崑鎾剁矆閸愵亞纾肩紓浣诡焽濞插鈧娲栫紞濠囥€佸▎鎴濇瀳閺夊牃鏂侀崑鎾搭槹鎼达絿锛濋梺绋挎湰閻熴劑宕楃仦瑙ｆ斀妞ゆ梻鍋撻弳顒勬煙椤曞棛绡€闁轰焦鎹囬幃鈺呮嚑閼稿灚鍟哄┑鐘垫暩閸嬬偤宕归鐐插瀭闁荤喓澧楅弳婊堟⒑閼姐倕鏋戠紒顔肩灱缁棃鎮介悽鐢电効闂佸湱鍎ら幐鑽ょ礊閸ヮ剚鐓忓┑鐐戝啯濯奸柛鐔烽叄濮婄粯鎷呯粙鎸庡€紓浣风劍閹稿啿顕ｉ幓鎺嗘闁靛繆鏅滈弲婊堟⒑閸偆澧褏鐦? ${txt.slice(0, 180)}`); }
   if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
 }
@@ -294,8 +624,11 @@ function buildDeviceHierarchy(db, devices) {
     const trimmed = dev.startsWith(db + ".") ? dev.slice(db.length + 1) : dev;
     const parts = trimmed.split(".").filter(Boolean);
     let node = root;
+    let curr = db;
     for (const part of parts) {
-      if (!node.children[part]) node.children[part] = { children: {}, device: null, fullPath: "" };
+      curr = curr + "." + part;
+      if (!node.children[part]) node.children[part] = { children: {}, device: null, fullPath: curr };
+      if (!node.children[part].fullPath) node.children[part].fullPath = curr;
       node = node.children[part];
     }
     node.device = dev;
@@ -316,8 +649,25 @@ function renderNode(parent, node, keyword, level = 0) {
       const details = document.createElement("details");
       details.open = level < 1 || !!keyword;
       const summary = document.createElement("summary");
-      summary.textContent = name;
       summary.title = fullPath || name;
+
+      const cap = document.createElement("span");
+      cap.className = "tree-db-name";
+      cap.textContent = name;
+
+      const infoBtn = document.createElement("button");
+      infoBtn.type = "button";
+      infoBtn.className = "tree-db-info-btn";
+      infoBtn.textContent = "i";
+      infoBtn.title = `View ${fullPath || name} info`;
+      infoBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openPathInfo(fullPath || name);
+      });
+
+      summary.appendChild(cap);
+      summary.appendChild(infoBtn);
       details.appendChild(summary);
       const box = document.createElement("div");
       box.className = "tree-node";
@@ -332,9 +682,26 @@ function renderNode(parent, node, keyword, level = 0) {
     if (!hit) continue;
     const leaf = document.createElement("div");
     leaf.className = "tree-leaf" + (selectedDevice === child.device ? " active" : "");
-    leaf.textContent = name;
-    leaf.title = child.device || name;
-    leaf.onclick = () => selectDevice(child.device || fullPath || name);
+    const cap = document.createElement("span");
+    cap.textContent = name;
+    cap.title = child.device || name;
+    cap.style.flex = "1";
+    cap.style.cursor = "pointer";
+    cap.onclick = () => selectDevice(child.device || fullPath || name);
+
+    const infoBtn = document.createElement("button");
+    infoBtn.type = "button";
+    infoBtn.className = "tree-db-info-btn";
+    infoBtn.textContent = "i";
+    infoBtn.title = `View ${child.device || name} info`;
+    infoBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openDeviceInfo(child.device || fullPath || name);
+    });
+
+    leaf.appendChild(cap);
+    leaf.appendChild(infoBtn);
     parent.appendChild(leaf);
   }
 }
@@ -345,7 +712,7 @@ function renderTree(tree) {
   const entries = Object.entries(tree || {});
   const keyword = $("treeFilter").value.trim().toLowerCase();
   if (!entries.length) {
-    root.innerHTML = "<div class='muted'>未加载到任何数据库（请检查连接参数或权限）</div>";
+    root.innerHTML = "<div class='muted'>闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣捣閻棗銆掑锝呬壕濡ょ姷鍋為悧鐘汇€侀弴銏℃櫆闁芥ê顦純鏇熺節閻㈤潧孝闁挎洏鍊楅埀顒佸嚬閸ｏ綁濡撮崨鏉戠煑濠㈣泛鐬奸惁鍫熺節閻㈤潧孝闁稿﹥鎮傞、鏃堫敂閸喓鍘卞┑鐐叉缁绘帞绮绘繝姘厸鐎光偓鐎ｎ剛袦濡ょ姷鍋涘ú顓€佸Δ鍛＜婵炴垶鐟ラ弸娑欑節閻㈤潧校妞ゆ梹鐗犲畷鏉课旈崘銊ョ亰闂佽宕橀褔鎷戦悢鍏肩叆闁哄洦顨呮禍楣冩煣娴兼瑧鍒伴柕鍡樺笒椤繈鎮℃惔锝勭敾缂備焦顨嗛崹鍨潖缂佹ɑ濯撮柧蹇曟嚀缁楋繝姊洪悷鐗堝暈闁诡喖鍊搁悾鐑藉箛閺夎法顔愭繛杈剧到濠€閬嶆偩閹惰姤鈷掗柛灞剧懆閸忓瞼绱掗鍛仯婵犫偓娓氣偓閺岋綁鎮╅顫闂備焦瀵уú鏍磹閹间焦鍤嬬憸鐗堝笚閻擄綁鐓崶銊﹀鞍閻犳劧绱曢惀顏堝礈瑜庡▍鏇㈡煃瑜滈崜娆戠不瀹ュ纾块梺顒€绉寸粻鐘绘煙闁箑骞楁繛鍛箻濮婅櫣鎷犻幓鎺濆妷濡炪倖姊归悧鐘茬暦閹剁瓔鏁嬮柍褜鍓欓悾鐑藉箣閻愮數鐦堥梺鎼炲劀閸涱垱姣囬梺鑽ゅ枑缁秹寮婚妸鈺傚仼闁绘垼濮ら崑鍌炲箹鐎涙〞鎴﹀棘閳ь剟姊绘担绋款棌闁稿鎳愮划娆撳箣閻愭娲告繛瀵稿帶閻°劑鍩涢幒鎳ㄥ綊鏁愰崨顔兼殘闁荤姵鍔х换婵嬪蓟濞戞鐔兼偐閸欏顦╅梺绋款儍閸婃繈寮婚弴鐔虹闁绘劦鍓氶悵鏃傜磽娴ｅ搫鞋妞ゎ偄顦垫俊鐢稿礋椤栨氨鐤€闂佸疇妗ㄧ拋鏌ュ磻閹捐鍐€妞ゆ挶鍔庣粙蹇涙⒑閸濆嫭宸濋柛鐘虫尵缁粯銈ｉ崘鈺冨幈闂佹枼鏅涢崢楣冾敂閸喎鈧爼鏌ㄩ弴鐐测偓褰掑磹閸偅鍙忔慨妤€妫楅獮鏍煕濠靛牆鍔嬮柟渚垮妽缁绘繈宕橀埞澶歌檸闁诲氦顫夊ú鏍礊婵犲洢鈧礁顫濈捄鍝勭獩濡炪倖鎸鹃崑娑⑺夊┑鍡忔斀闁绘ɑ鍓氶崯蹇涙煕閻樺磭澧甸柡浣稿暣椤㈡棃宕卞▎搴ｇ憹闂備礁鎼粙渚€宕㈡總鍛婂珔闁绘柨鍚嬮悡銉︾箾閹寸伝顏堫敂瑜庣换娑樼暆婵犱線鍋楅梺璇″枛缂嶅﹤鐣烽崼鏇炍╅柕澹懌鍋℃繝鐢靛У椤旀牠宕伴幘璇茬９婵°倕鍟～鏇㈡煙閹呮憼濠殿垱鎸抽弻褑绠涢弴鐔锋畬缂備焦顨愮换婵嗩潖濞差亝鍊婚柍鍝勫€归悵锕傛⒑閹肩偛濡奸柣鏍с偢楠炲啯瀵奸幖顓熸櫔闂侀€炲苯澧撮柣娑卞櫍楠炴帡骞婇搹顐ｎ棃闁糕斁鍋撳銈嗗坊閸嬫捇鏌℃笟鍥ф珝婵﹦绮粭鐔煎焵椤掆偓椤洩顦归挊婵囥亜閹惧崬鐏╃痪鎯ф健閺岋紕浠︾拠鎻掑婵犮垼娉涜墝闁衡偓娴犲鍊甸柨婵嗛娴滄劙鏌熼柨瀣仢闁哄备鍓濆鍕沪閹存帗鍕冨┑鐘愁問閸垳鍒掑▎蹇曟殾婵°倕鍟╁▽顏嗙磼濞戞﹩鍎戦柛鐐垫暬閹嘲顭ㄩ崘顔煎及闂侀潧妫楅崯顖滄崲濠靛纾兼繝濠傚椤旀洟鏌ｉ悢鍝ョ煂濠⒀勵殘閺侇噣骞掗幘鍐插闂傚倸鍊风粈渚€鎮块崶褜娴栭柕濞炬櫆閸ゅ嫰鏌ら崨濠庡晱婵炲牅绮欓弻娑㈠Ψ椤旂厧顫梺鎶芥敱閸ㄥ潡寮诲☉妯锋婵鐗嗘导鎰節濞堝灝娅欑紒鐘虫崌瀵鈽夐姀鈥充汗闂佸綊顣﹂悞锕傛偪娴ｅ壊娓婚柕鍫濆暙閻忣亪鏌熼崨濠冨€愰柛鈹垮灪閹棃濡搁妷褜鍟嬮梺璇叉捣閺佹悂鈥﹂崼婵愬殨?/div>";
     return;
   }
   let renderedDb = 0;
@@ -356,8 +723,22 @@ function renderTree(tree) {
     const details = document.createElement("details");
     details.open = true;
     const summary = document.createElement("summary");
-    summary.textContent = db;
     summary.title = db;
+    const dbName = document.createElement("span");
+    dbName.className = "tree-db-name";
+    dbName.textContent = db;
+    const infoBtn = document.createElement("button");
+    infoBtn.type = "button";
+    infoBtn.className = "tree-db-info-btn";
+    infoBtn.textContent = "i";
+    infoBtn.title = `View ${db} info`;
+    infoBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openDbInfo(db);
+    });
+    summary.appendChild(dbName);
+    summary.appendChild(infoBtn);
     details.appendChild(summary);
     const hierarchy = buildDeviceHierarchy(db, list);
     const box = document.createElement("div");
@@ -367,23 +748,96 @@ function renderTree(tree) {
     root.appendChild(details);
     renderedDb += 1;
   }
-  if (renderedDb === 0) root.innerHTML = "<div class='muted'>搜索无匹配结果</div>";
+  if (renderedDb === 0) root.innerHTML = "<div class='muted'>闂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸ゅ嫰鏌涢锝嗙缂佺姷濞€閺岀喖骞戦幇闈涙闁荤喐鐟辩粻鎾诲箖濡ゅ懏鏅查幖绮光偓鎰佹交闂備焦鎮堕崝宥囨崲閸儳宓侀柡宥庣仈鎼搭煈鏁嗛柍褜鍓氭穱濠囨嚃閳哄啯锛忛梺璇″瀻娴ｉ晲鍒掗梻浣告惈閺堫剙煤濡吋宕叉繛鎴欏灪閸婇攱銇勯幒宥堝厡鐟滄澘鎳愮槐鎾诲磼濞嗘垼绐楅梺绋款儏鐎氼喚鍒掗弮鍥ヤ汗闁圭儤鍨奸幗鏇㈡⒑閹稿海绠撻柟鍙夛耿閹垽鎮滃Ο铏瑰酱闂備浇鍋愰埛鍫ュ礈濞戙垹围闁绘垼濮ら埛鎺懨归敐鍫燁仩閻㈩垱鐩弻锝呂旈崘銊愶絿绱掗崒姘毙ら柟鐟板缁楃喖顢涘☉姘扁枆濠电姷鏁搁崑娑樜熸繝鍐洸婵犲﹤鎳愬Λ顖滄喐閺冨牆绠栫憸鐗堝笒缁犳帡鏌熼悜妯虹仴妞ゃ儱閰ｅ娲濞戞艾顣哄┑鐐茬湴閸斿孩绔熼弴銏犵缂佹妗ㄧ花濠氭⒑閸濆嫬鈧湱鈧瑳鍥х畾闁割偅绺鹃弨鑺ャ亜閺冨倸甯堕柍褜鍓欓…鐑藉春閳?/div>";
 }
 
 function updatePointStat() {
-  $("pointStat").textContent = `${selectedPoints.size} / ${allPoints.length}`;
+  $("pointStat").textContent = `${selectedPoints.size} / ${pointsTotal}`;
+}
+
+function updatePointPager() {
+  const page = Math.max(1, pointsPage || 1);
+  const totalPages = Math.max(1, pointsTotalPages || 1);
+  $("pointsPageStat").textContent = `${page} / ${totalPages}`;
+  $("pointsTotalStat").textContent = `Total: ${pointsTotal}`;
+  $("pointsPrevBtn").disabled = page <= 1;
+  $("pointsNextBtn").disabled = page >= totalPages;
+}
+
+function closePointMenu() {
+  if (openPointMenuEl) {
+    openPointMenuEl.classList.remove("open");
+    openPointMenuEl = null;
+  }
+  document.querySelectorAll(".point-more[aria-expanded='true']").forEach((btn) => {
+    btn.setAttribute("aria-expanded", "false");
+  });
+}
+
+function resolveDefaultType(v) {
+  const t = String(v || "").toUpperCase();
+  if (["BOOLEAN","INT32","INT64","FLOAT","DOUBLE","TEXT","STRING","BLOB","DATE","TIMESTAMP"].includes(t)) return t;
+  return "FLOAT";
+}
+
+async function deletePoint(path, point) {
+  const typed = window.prompt(`Type full point path to confirm delete.\nPath: ${path}`);
+  if (typed !== path) {
+    setMsg("Canceled: confirmation text does not match point path", "err");
+    return false;
+  }
+  try {
+    setMsg(`Deleting point ${point} ...`, "info");
+    await postJson("/api/point_delete", { ...connPayload(), path });
+    await reloadPointsByDevice(selectedDevice, false);
+    setMsg(`Point deleted: ${point}`, "ok");
+    return true;
+  } catch (e) {
+    setMsg(e.message, "err");
+    return false;
+  }
+}
+
+async function retypePoint(path, point, oldType, fixedType = null) {
+  let newType = "";
+  if (fixedType && String(fixedType).trim()) {
+    newType = resolveDefaultType(fixedType);
+  } else {
+    const input = window.prompt(`Change data type for ${path}\nCurrent: ${oldType || "unknown"}\nTarget type (BOOLEAN/INT32/INT64/FLOAT/DOUBLE/TEXT/STRING/BLOB):`, resolveDefaultType(oldType));
+    if (!input) return false;
+    newType = resolveDefaultType(input);
+  }
+
+  const typed = window.prompt(`This operation deletes historical data of this point.\nType full point path to confirm retype.\nPath: ${path}\nNew Type: ${newType}`);
+  if (typed !== path) {
+    setMsg("Canceled: confirmation text does not match point path", "err");
+    return false;
+  }
+
+  try {
+    setMsg(`Retyping ${point} to ${newType} ...`, "info");
+    await postJson("/api/point_retype", { ...connPayload(), path, data_type: newType });
+    await reloadPointsByDevice(selectedDevice, false);
+    setMsg(`Point retyped: ${point} -> ${newType}`, "ok");
+    return true;
+  } catch (e) {
+    setMsg(e.message, "err");
+    return false;
+  }
 }
 
 function renderPoints() {
   const p = $("points");
-  const keyword = $("pointFilter").value.trim().toLowerCase();
   p.innerHTML = "";
-  let shown = 0;
+  closePointMenu();
   for (const point of allPoints) {
-    if (keyword && !point.toLowerCase().includes(keyword)) continue;
-    shown += 1;
-    const label = document.createElement("label");
-    label.title = point;
+    const row = document.createElement("div");
+    row.className = "point-item";
+    row.title = pointPaths[point] || point;
+
+    const main = document.createElement("label");
+    main.className = "point-main";
+
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.value = point;
@@ -393,25 +847,79 @@ function renderPoints() {
       else selectedPoints.delete(point);
       updatePointStat();
     };
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(point));
-    p.appendChild(label);
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "point-name";
+    nameEl.textContent = point;
+
+    const typeEl = document.createElement("span");
+    typeEl.className = "point-type";
+    typeEl.textContent = pointTypes[point] || "UNKNOWN";
+
+    main.appendChild(cb);
+    main.appendChild(nameEl);
+    main.appendChild(typeEl);
+
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "point-more";
+    moreBtn.textContent = "...";
+    moreBtn.title = "Point info";
+    moreBtn.setAttribute("aria-label", "Point info");
+
+    moreBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const path = pointPaths[point] || (selectedDevice ? `${selectedDevice}.${point}` : point);
+      openPointInfo(path);
+    };
+
+    row.appendChild(main);
+    row.appendChild(moreBtn);
+    p.appendChild(row);
   }
-  if (shown === 0) p.innerHTML = "<div class='muted'>没有匹配点位</div>";
+  if (allPoints.length === 0) p.innerHTML = "<div class='muted'>No points matched</div>";
   updatePointStat();
+  updatePointPager();
+}
+
+async function reloadPointsByDevice(dev, resetSelection, resetPage = false) {
+  if (resetPage) pointsPage = 1;
+  const reqId = ++pointsReqSeq;
+  const data = await postJson("/api/points", {
+    ...connPayload(),
+    device: dev,
+    page: pointsPage,
+    page_size: pointsPageSize,
+    keyword: pointsKeyword,
+  });
+  // Ignore stale responses (e.g. device switched or newer search/page request already sent).
+  if (reqId !== pointsReqSeq) return;
+  if (dev !== selectedDevice) return;
+  allPoints = data.points || [];
+  pointTypes = data.point_types || {};
+  pointPaths = data.point_paths || {};
+  pointsTotal = Number(data.total || 0);
+  pointsPage = Number(data.page || 1);
+  pointsPageSize = Number(data.page_size || pointsPageSize || 1000);
+  pointsTotalPages = Number(data.total_pages || 1);
+  if (resetSelection) {
+    selectedPoints = new Set();
+  }
+  renderPoints();
 }
 
 async function selectDevice(dev) {
   selectedDevice = dev;
+  pointsKeyword = "";
+  pointsPage = 1;
+  $("pointFilter").value = "";
+  switchRightView("query");
   $("device").value = dev;
   renderTree(treeData);
-  setMsg(`正在加载设备点位: ${dev} ...`, "info");
-  const data = await postJson("/api/points", { ...connPayload(), device: dev });
-  allPoints = data.points || [];
-  selectedPoints = new Set();
-  $("pointFilter").value = "";
-  renderPoints();
-  setMsg(`点位加载完成，共 ${allPoints.length} 个`, "ok");
+  setMsg(`Loading device points: ${dev} ...`, "info");
+  await reloadPointsByDevice(dev, true, true);
+  setMsg(`Points loaded: ${pointsTotal}`, "ok");
 }
 
 function timeToReadable(v) {
@@ -590,14 +1098,14 @@ function renderTrend() {
   const cols = lastResult.columns || [];
   const rows = lastResult.rows || [];
   if (!cols.length || !rows.length) {
-    svg.innerHTML = "<text x='20' y='30' fill='#6b7d86' font-size='12'>暂无数据</text>";
+    svg.innerHTML = "<text x='20' y='30' fill='#6b7d86' font-size='12'>闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣捣閻棗銆掑锝呬壕濡ょ姷鍋為悧鐘汇€侀弴銏犵厬闁兼亽鍎抽埥澶愭懚閺嶎厽鐓曟繛鎴濆船楠炴﹢鏌ㄥ☉娆戞噰婵﹥妞介幊锟犲Χ閸涱喚鈧箖鏌ｆ惔銏ｅ闁绘妫濋崺銉﹀緞閹邦剦娼婇梺缁樕戦悥鐘诲礃閸撗冩暩闂佽崵濮惧▍锝囦焊閵娾晛缁╁┑鐘崇閻撶喖骞栭幖顓炴灈濠⒀冪摠閹便劍绻濋崨顕呬哗缂備浇椴哥敮鎺楋綖濠婂牆骞㈡俊顖氬悑濞堜粙姊婚崒娆掑厡缂侇噮鍨堕妴鍐川椤撳洦绋戦埥澶婎潩椤掆偓閻?/text>";
     trendRenderCtx = null;
     return;
   }
 
   const timeIdx = findTimeIdx(cols, rows);
   if (timeIdx < 0) {
-    svg.innerHTML = "<text x='20' y='30' fill='#6b7d86' font-size='12'>未识别到时间列，无法绘图</text>";
+    svg.innerHTML = "<text x='20' y='30' fill='#6b7d86' font-size='12'>闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣捣閻棗銆掑锝呬壕濡ょ姷鍋為悧鐘汇€侀弴銏℃櫆闁芥ê顦純鏇熺節閻㈤潧孝闁挎洏鍊楅埀顒佸嚬閸ｏ綁濡撮崨鏉戣摕闁靛濡囬崣鍡椻攽閻樼粯娑ф俊顐幖鍗辩憸鐗堝笚閻撴洟骞栫划瑙勵潐闂婎剦鍓熼弻鈥崇暆閳ь剟宕伴幇顒夌劷闊洦绋戠粈鍫㈡喐韫囨稑姹查柣妯兼暩绾捐棄霉閿濆棗绲诲ù婊堢畺濮婅櫣鍖栭弴鐐测拤闁煎灕鍏犵懓顭ㄩ崟顓犵厜闂佸搫鐬奸崰鏍嵁瀹ュ鎯炴い鎰剁悼瑜板懘姊绘担绛嬪殭缂佽妫濆鏌ユ偐鐠囪尪鎽曢梺鎸庣箓椤︻垳绮绘繝姘厱闁归偊鍘鹃妶鎾煕鐎ｎ偅宕岀€规洜顭堣灃闁逞屽墴閹锋垿鎮㈤崗鑲╁弳闂佺粯鏌ㄩ幖顐㈢摥缂傚倷璁查崑鎾绘煕閹伴潧鏋熼柣鎾崇箰閳规垿鎮欓幋婵嗘殭闁哄棛鍠栭弻娑樜熼崹顔ф挾绱掔紒妯肩畼闁哥姴锕よ灒婵炶尙绮紞澶愭⒒娴ｄ警鐒炬い鎴濇噽閳ь剚鍑归崜鐔煎灳閿曞倸鐐婃い鎺嗗亾闁诲繐纾埀顒冾潐濞叉牕煤閿曗偓閳绘捇骞嗚閺€鑺ャ亜閺冣偓閺嬬粯绗熷☉銏＄厱閹艰揪绲鹃弳顒傗偓娈垮櫘閸ｏ絽鐣烽幒鎳虫棃鍩€椤掍胶顩插Δ锝呭暞閻撱儲绻濋棃娑欘棦妞ゅ孩顨呴…鑳槾濠⒀勵殜婵＄敻宕熼娑欐珕闁荤姴娲ゅ鍫曟偟濠靛棌鏀芥い鏃傘€嬮弨缁樹繆閻愯埖顥夐柣锝囧厴椤㈡洟鏁冮埀顒傜矆鐎ｎ偁浜滈柟鏉垮缁嬬粯銇勯弬璺ㄐ㈤柍瑙勫灴閹晠骞囨担鍛婃珱闂備礁鎽滄慨闈涚暆缁嬫鍤曟い鎰╁€楅惌娆撳箹鐎涙ɑ灏版い顐㈢Ч濮婂搫效閸パ呬紕濡炪値鍘奸悧蹇曞垝閸儱閱囨繝銏＄箓缂嶅﹪寮幇鏉块唶闁绘洑妞掗崫妤呮⒒娴ｇ懓顕滅紒瀣笧閸掓帒鐣濋崟顐ゅ幋闂佺鎻粻鎴︽偂閿熺姵鐓曢柍鈺佸枤濞堟ê霉閻欌偓閸ㄨ泛顫忛搹鍦煓閻犳亽鍔嶅Σ鈧梻浣侯焾閿曘儵銆冮崼銉ョ?/text>";
     trendRenderCtx = null;
     return;
   }
@@ -613,7 +1121,7 @@ function renderTrend() {
     if (sample > 0 && ok / sample > 0.5) seriesIdx.push(i);
   }
   if (!seriesIdx.length) {
-    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>未找到数值列，无法绘图</text>`;
+    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣捣閻棗銆掑锝呬壕濡ょ姷鍋為悧鐘汇€侀弴銏℃櫆闁芥ê顦純鏇熺節閻㈤潧孝闁挎洏鍊楅埀顒佸嚬閸ｏ綁濡撮崨鏉戠煑濠㈣泛鐬奸惁鍫ユ⒒閸屾氨澧涚紒瀣笒椤斿繐鈹戠€ｎ偆鍘藉┑鐘绘涧閿曘倝鎮￠幇鐗堢厵濞撴艾鐏濇俊鍏笺亜椤忓嫬鏆熼柟椋庡█閻擃偊顢橀悜鍡橆棥闂傚倷娴囬褍顫濋敃鍌︾稏濠㈣泛鈯曢崫鍕庣喖鎼圭憴鍕暦闂備礁缍婂Λ璺ㄧ矆娴ｈ櫣涓嶉柡宥庡亝閸犳劙鏌￠崒婵囩《闁哄棴绠戦埞鎴﹀磼濮橆厼鏆堥梺绋款儏鐎氫即寮诲☉銏犵闁哄鍨圭粊鐑芥⒑閸濆嫭鍣洪柣鐔叉櫅椤繑绻濆顒傦紲濠电偛妫欑敮鎺楀储閳ユ剚娓婚柕鍫濋楠炴牠鏌ｅΔ浣瑰磳鐎殿噮鍋婂畷姗€顢欓懞銉︾彇闂備胶顭堥張顒勬嚌妤ｅ啫纾荤€广儱顦伴崑鈩冪節婵犲倸顏柣鎾卞劦閺岋綁鏁愰崶銊у姽闂侀潧娲﹂崝娆撶嵁閹烘垟鏀介柛銉ｅ妽閻濇洟姊婚崒娆戭槮濠㈢懓锕畷鎴﹀幢濞戞鐛ラ梺褰掑亰閸忔﹢寮稿澶嬬厸鐎广儱楠搁獮妤呮煟閹捐泛鏋涢柣鎿冨亰瀹曞爼濡搁敂缁㈡К濠电偛顕慨宥夊炊閵娧冨箞闂佽鍑界紞鍡涘磻閸涱厾鏆︾€光偓閸曨剛鍘告繛杈剧秬椤鐣风仦瑙ｆ斀闁挎稑瀚崢鎾煛娴ｇ鈧灝鐣峰鍡╂闂佸摜鍠庢鎼佸煘閹达附鍋愭い鏃囧亹娴煎洤鈹戦悙宸Ч闁烩晩鍨堕妴渚€寮介鐐茶€垮┑鐐叉閸ㄥ綊鎮炴總鍛娾拺闁告挻褰冩禍鏍煕閵娿劌鍚瑰瑙勬礋瀹曟绮潪鎵泿闂備礁鎼ú銊╁磻閻愬搫闂憸鐗堝笚閻撶喖鐓崶銉ュ姎妞も晩鍓熼弻?/text>`;
     trendRenderCtx = null;
     return;
   }
@@ -630,7 +1138,7 @@ function renderTrend() {
     data.push({ t, vals });
   });
   if (!data.length) {
-    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>数据为空</text>`;
+    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>闂傚倸鍊搁崐鎼佸磹閹间礁纾圭€瑰嫭鍣磋ぐ鎺戠倞鐟滄粌霉閺嶎厽鐓忓┑鐐靛亾濞呭棝鏌涢妶鍛伃闁哄被鍊楃划娆戞崉閵娿倗椹虫繝鐢靛仜閹虫劖鎱ㄩ崹顐も攳濠电姴娲ゅ洿闂佺鏈惌顔界珶閺囥垺鈷掑ù锝夘棑娑撹尙绱掗煫顓犵煓闁诡喗锚椤繄鎹勯搹璇″數闂備礁鎲＄粙鎺戭焽濞嗘挸绠查柤鍝ュ仯娴滄粓鏌熼幆褜鍤熼柍顖涙礋閺岋綀绠涢幘铏濠殿喖锕︾划顖炲箯閸涘瓨鍋￠柡澶婄仢琚樼紓鍌氬€烽懗鍓佸垝椤栫偛绀夋繛鍡楃箳閺嗭箓鏌曡箛鏇烆€岄柣鎾卞劦閺屾盯顢曢敐鍥╃暫闂?/text>`;
     trendRenderCtx = null;
     return;
   }
@@ -678,7 +1186,7 @@ function renderTrend() {
     });
   });
   if (!Number.isFinite(ymin) || !Number.isFinite(ymax)) {
-    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>数值为空</text>`;
+    svg.innerHTML = `<text x='20' y='30' fill='${cssVar("--trend-label", "#6b7d86")}' font-size='12'>闂傚倸鍊搁崐鎼佸磹閹间礁纾圭€瑰嫭鍣磋ぐ鎺戠倞鐟滄粌霉閺嶎厽鐓忓┑鐐靛亾濞呭棝鏌涙繝鍌涘仴闁哄被鍔戝鏉懳旈埀顒佺閹屾富闁靛牆楠搁獮鏍煟韫囨梻绠為柨婵堝仜椤劑宕煎┑鍫濆Е婵＄偑鍊栫敮鎺斺偓姘煎墴瀵即濡烽埡鍌滃帗閻熸粍绮撳畷婊冾潩鐠轰綍锕傛煕閺囥劌鐏犵紒鐘冲▕閺岀喓鈧稒顭囩粻銉ッ归悩鑽ょ暫婵﹥妞介獮鎰償閿濆啠鍋撻幒妤佺厱闁绘ê纾晶鍨殽閻愭彃鏆㈤柕鍥ㄥ姍楠炴帡骞嬮悩鍨緫濠碉紕鍋戦崐鏍蓟閵娾晛瑙﹂悗锝庡枟閸婅泛霉閿濆牊顏犵痪?/text>`;
     trendRenderCtx = null;
     return;
   }
@@ -995,11 +1503,12 @@ $("loadTreeBtn").onclick = async () => {
   const btn = $("loadTreeBtn");
   try {
     btn.disabled = true;
-    setMsg("正在加载树，请稍候...", "info");
+    setMsg("Loading tree, please wait...", "info");
+    await fetchServerVersion();
     const data = await postJson("/api/tree", connPayload());
     treeData = data.tree || {};
     renderTree(treeData);
-    setMsg(`树加载完成，共 ${Object.keys(treeData).length} 个数据库`, "ok");
+    setMsg(`Tree loaded: ${Object.keys(treeData).length} databases`, "ok");
   } catch (e) {
     setMsg(e.message, "err");
   } finally {
@@ -1008,7 +1517,26 @@ $("loadTreeBtn").onclick = async () => {
 };
 
 $("treeFilter").addEventListener("input", () => renderTree(treeData));
-$("pointFilter").addEventListener("input", () => renderPoints());
+let pointFilterTimer = null;
+$("pointFilter").addEventListener("input", () => {
+  pointsKeyword = $("pointFilter").value.trim();
+  if (pointFilterTimer) clearTimeout(pointFilterTimer);
+  pointFilterTimer = setTimeout(async () => {
+    if (!selectedDevice) return;
+    pointsPage = 1;
+    await reloadPointsByDevice(selectedDevice, false, true);
+  }, 250);
+});
+$("pointsPrevBtn").addEventListener("click", async () => {
+  if (!selectedDevice || pointsPage <= 1) return;
+  pointsPage -= 1;
+  await reloadPointsByDevice(selectedDevice, false, false);
+});
+$("pointsNextBtn").addEventListener("click", async () => {
+  if (!selectedDevice || pointsPage >= pointsTotalPages) return;
+  pointsPage += 1;
+  await reloadPointsByDevice(selectedDevice, false, false);
+});
 $("clearPointsBtn").addEventListener("click", () => {
   selectedPoints = new Set();
   renderPoints();
@@ -1026,6 +1554,18 @@ $("trendReset").addEventListener("click", () => {
 });
 $("themeSelect").addEventListener("change", (e) => applyTheme(e.target.value));
 
+document.addEventListener("click", (e) => {
+  if (!openPointMenuEl) return;
+  const t = e.target;
+  if (t && t.closest && t.closest(".point-more-menu")) return;
+  if (t && t.closest && t.closest(".point-more")) return;
+  closePointMenu();
+});
+
+$("toggleConsoleBtn").addEventListener("click", () => {
+  setConsoleMode(!consoleMode);
+});
+
 $("buildBtn").onclick = () => {
   $("sql").value = buildSql();
 };
@@ -1034,7 +1574,7 @@ $("runBtn").onclick = async () => {
   const btn = $("runBtn");
   try {
     btn.disabled = true;
-    setMsg("正在执行 SQL...", "info");
+    setMsg("濠电姷鏁告慨鐑藉极閸涘﹥鍙忛柣銏犲閺佸﹪鏌″搴″箹缂佹劖顨嗘穱濠囧Χ閸涱厽娈查悗瑙勬礃閻擄繝寮婚悢鍏肩劷闁挎洍鍋撻柡瀣〒缁辨帡鐓幓鎺嗗亾濠靛钃熼柨鏇楀亾閾伙絽銆掑鐓庣仭妞ゅ骸妫濆娲嚃閳轰緡鏆柣搴ｇ懗閸ヮ灛锕傛煕閺囥劌鏋ら柣銈傚亾闂備浇顫夊畷妯衡枖濞戭潿鈧倿鎼归崷顓狅紳婵炶揪绲介幖顐モ叿闂備胶顭堢€涒晜绻涙繝鍥╁祦濠㈣埖鍔曠粻鐟懊归敐鍛喐妞ゆ挻妞藉娲箰鎼淬埄姊块梺闈涙閸嬫捇姊?SQL...", "info");
     const sql = $("sql").value.trim();
     const data = await postJson("/api/query", { ...connPayload(), sql });
     lastQueryWindow = parseQueryWindow(sql);
@@ -1044,13 +1584,90 @@ $("runBtn").onclick = async () => {
       desiredMetricColumnsBySelection(),
     );
     renderResult(ordered.columns, ordered.rows);
-    setMsg(`执行完成，返回 ${data.rows ? data.rows.length : 0} 行`, "ok");
+    setMsg(`Query completed: ${data.rows ? data.rows.length : 0} rows`, "ok");
   } catch (e) {
     setMsg(e.message, "err");
   } finally {
     btn.disabled = false;
   }
 };
+
+$("backToQueryBtn").addEventListener("click", () => {
+  switchRightView("query");
+});
+
+$("dbTtlPreset").addEventListener("change", () => {
+  const mode = $("dbTtlPreset").value;
+  const isCustom = mode === "custom";
+  $("dbTtlDays").disabled = !isCustom;
+  if (!isCustom && mode !== "never") $("dbTtlDays").value = mode;
+});
+
+$("applyDbTtlBtn").addEventListener("click", async () => {
+  if (!currentInfoPath) {
+    setDbInfoMsg("Please open a database/device/path info first", "err");
+    return;
+  }
+
+  const preset = $("dbTtlPreset").value;
+  let ttlMs = null;
+  if (preset === "never") {
+    ttlMs = null;
+  } else {
+    const daysVal = preset === "custom" ? $("dbTtlDays").value : preset;
+    const days = Number(daysVal);
+    if (!Number.isFinite(days) || days <= 0) {
+      setDbInfoMsg("Invalid TTL days", "err");
+      return;
+    }
+    ttlMs = Math.floor(days * 24 * 60 * 60 * 1000);
+  }
+
+  const targetText = ttlMs == null ? "never expire" : ttlMsToText(ttlMs);
+  const typed = window.prompt(`Type path to confirm TTL change.\nPath: ${currentInfoPath}\nNew TTL: ${targetText}`);
+  if (typed !== currentInfoPath) {
+    setDbInfoMsg("Canceled: confirmation text does not match path", "err");
+    return;
+  }
+
+  try {
+    setDbInfoMsg(`Applying TTL for ${currentInfoPath} ...`, "info");
+    await postJson("/api/path_ttl", { ...connPayload(), path: currentInfoPath, ttl_ms: ttlMs });
+    if (currentInfoMode === "database") await openDbInfo(currentInfoPath);
+    else if (currentInfoMode === "device") await openDeviceInfo(currentInfoPath);
+    else if (currentInfoMode === "point") await openPointInfo(currentInfoPath);
+    else await openPathInfo(currentInfoPath);
+    setDbInfoMsg(`TTL updated: ${targetText}`, "ok");
+  } catch (e) {
+    setDbInfoMsg(e.message, "err");
+  }
+});
+
+$("pointDeleteBtn").addEventListener("click", async () => {
+  if (!currentPointInfo || !currentPointInfo.path) {
+    setDbInfoMsg("Open a point info first", "err");
+    return;
+  }
+  const ok = await deletePoint(currentPointInfo.path, currentPointInfo.point || currentPointInfo.path);
+  if (!ok) return;
+  switchRightView("query");
+});
+
+$("pointRetypeBtn").addEventListener("click", async () => {
+  if (!currentPointInfo || !currentPointInfo.path) {
+    setDbInfoMsg("Open a point info first", "err");
+    return;
+  }
+  const targetType = $("pointRetypeInput").value.trim() || currentPointInfo.data_type || "FLOAT";
+  const ok = await retypePoint(
+    currentPointInfo.path,
+    currentPointInfo.point || currentPointInfo.path,
+    currentPointInfo.data_type || "",
+    targetType,
+  );
+  if (!ok) return;
+  await openPointInfo(currentPointInfo.path);
+});
 
 bindSplitter();
 bindResultSplitter();
@@ -1059,7 +1676,28 @@ initCustomTimeDefaults();
 syncRangeInputs();
 syncGroupInputs();
 updatePointStat();
+updatePointPager();
+setConsoleMode(false);
+switchRightView("query");
+fetchServerVersion();
+if ($("dbTtlPreset")) $("dbTtlPreset").dispatchEvent(new Event("change"));
 
 const savedTheme = localStorage.getItem("iotdb_theme") || "compact_blue";
 if ($("themeSelect")) $("themeSelect").value = savedTheme;
 applyTheme(savedTheme);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

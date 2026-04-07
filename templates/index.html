@@ -1,4 +1,4 @@
-<!doctype html>
+ï»¿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -10,161 +10,240 @@
   <header>
     <h1>IoTDB Lite Viewer <small>v{{ app_version }}</small></h1>
     <div class="conn">
-      <select id="themeSelect" title="Ö÷Ìâ">
-        <option value="compact_blue" selected>À¶»Ò½ô´Õ</option>
-        <option value="light_clean">Ç³É«ÇåË¬</option>
-        <option value="mint_pro">±¡ºÉ×¨Òµ</option>
-        <option value="dark_graph">ÉîÉ«Í¼±í</option>
+      <select id="themeSelect" title="Theme">
+        <option value="compact_blue" selected>Compact Blue</option>
+        <option value="light_clean">Light Clean</option>
+        <option value="mint_pro">Mint Pro</option>
+        <option value="dark_graph">Dark Graph</option>
       </select>
       <input id="host" value="172.16.41.13" placeholder="Host" />
       <input id="port" value="6667" placeholder="Port" />
       <input id="username" value="root" placeholder="Username" />
       <input id="password" value="root" placeholder="Password" type="password" />
-      <button id="loadTreeBtn">¼ÓÔØÊ÷</button>
+      <span id="serverVersion" class="muted">IoTDB: -</span>
+      <button id="loadTreeBtn">Load Tree</button>
     </div>
   </header>
 
   <main>
     <section class="panel tree">
-      <h2>Ê÷ä¯ÀÀ</h2>
+      <h2>Tree</h2>
       <div class="toolbar">
-        <input id="treeFilter" placeholder="ËÑË÷Éè±¸/Â·¾¶¹Ø¼ü´Ê" />
+        <input id="treeFilter" placeholder="Search device/path" />
       </div>
       <div id="tree"></div>
     </section>
-    <div id="splitter" title="ÍÏ×§µ÷Õû×óÓÒ¿í¶È"></div>
+    <div id="splitter" title="Drag to resize"></div>
 
     <section class="panel query">
-      <h2>²éÑ¯¹¹½¨</h2>
-      <section id="resultPane" class="result-pane">
-        <div class="result-head">
-          <div class="result-title">²éÑ¯½á¹û</div>
-          <div class="tabs">
-            <button id="tabTable" class="tab active">Table</button>
-            <button id="tabTrend" class="tab">Trend</button>
+      <div id="queryView">
+        <h2>Query Builder</h2>
+        <section id="resultPane" class="result-pane">
+          <div class="result-head">
+            <div class="result-title">Query Result</div>
+            <div class="tabs">
+              <button id="tabTable" class="tab active">Table</button>
+              <button id="tabTrend" class="tab">Trend</button>
+            </div>
+            <div id="trendTools" class="trend-tools hidden">
+              <label>Style</label>
+              <select id="trendMode">
+                <option value="line" selected>Line</option>
+                <option value="step">Step</option>
+              </select>
+              <button id="trendReset" class="tab">Reset Zoom</button>
+            </div>
           </div>
-          <div id="trendTools" class="trend-tools hidden">
-            <label>ÑùÊ½</label>
-            <select id="trendMode">
-              <option value="line" selected>ÕÛÏß</option>
-              <option value="step">Ö±½ÇÕÛÏß</option>
-            </select>
-            <button id="trendReset" class="tab">ÖØÖÃËõ·Å</button>
+          <div id="resultTableWrap" class="table-wrap">
+            <table id="result"></table>
           </div>
-        </div>
-        <div id="resultTableWrap" class="table-wrap">
-          <table id="result"></table>
-        </div>
-        <div id="resultTrendWrap" class="trend-wrap hidden">
-          <svg id="trendSvg" viewBox="0 0 1000 360" preserveAspectRatio="none"></svg>
-          <div id="trendTip" class="trend-tip hidden"></div>
-        </div>
-      </section>
-      <div id="hsplitter" title="ÍÏ×§µ÷Õû½á¹ûÇø¸ß¶È"></div>
+          <div id="resultTrendWrap" class="trend-wrap hidden">
+            <svg id="trendSvg" viewBox="0 0 1000 360" preserveAspectRatio="none"></svg>
+            <div id="trendTip" class="trend-tip hidden"></div>
+          </div>
+        </section>
+        <div id="hsplitter" title="Drag to resize result area"></div>
 
-      <div class="row">
-        <label>Éè±¸</label>
-        <input id="device" readonly />
-      </div>
-      <div class="row">
-        <label>µãÎ»</label>
-        <input id="pointFilter" placeholder="ËÑË÷µãÎ»" />
-      </div>
-      <div class="row">
-        <label>ÒÑÑ¡</label>
-        <div id="pointStat" class="muted">0 / 0</div>
-        <button id="clearPointsBtn" type="button">È¡ÏûÈ«²¿</button>
-      </div>
-      <div class="row row-points">
-        <label></label>
-        <div id="points"></div>
-      </div>
-      <div class="query-card">
-        <div class="row grid">
-          <div class="field">
-            <span>¾ÛºÏº¯Êý</span>
-            <select id="agg">
-              <option value="raw">raw</option>
-              <option value="mean" selected>mean</option>
-              <option value="max">max</option>
-              <option value="min">min</option>
-              <option value="sum">sum</option>
-              <option value="count">count</option>
-              <option value="first">first</option>
-              <option value="last">last</option>
-            </select>
+        <div id="builderPanel">
+        <div class="row">
+          <label>Device</label>
+          <input id="device" readonly />
+        </div>
+        <div class="row">
+          <label>Points</label>
+          <input id="pointFilter" placeholder="Search points" />
+        </div>
+        <div class="row">
+          <label>Selected</label>
+          <div id="pointStat" class="muted">0 / 0</div>
+          <button id="clearPointsBtn" type="button">Clear</button>
+        </div>
+        <div class="row row-points">
+          <label></label>
+          <div id="points"></div>
+        </div>
+        <div class="row">
+          <label>Page</label>
+          <button id="pointsPrevBtn" type="button">Prev</button>
+          <div id="pointsPageStat" class="muted">1 / 1</div>
+          <button id="pointsNextBtn" type="button">Next</button>
+          <div id="pointsTotalStat" class="muted">Total: 0</div>
+        </div>
+        <div class="query-card">
+          <div class="row grid">
+            <div class="field">
+              <span>Aggregation</span>
+              <select id="agg">
+                <option value="raw">raw</option>
+                <option value="mean" selected>mean</option>
+                <option value="max">max</option>
+                <option value="min">min</option>
+                <option value="sum">sum</option>
+                <option value="count">count</option>
+                <option value="first">first</option>
+                <option value="last">last</option>
+              </select>
+            </div>
+            <div class="field">
+              <span>Time Range</span>
+              <select id="range">
+                <option value="15m">Last 15m</option>
+                <option value="1h">Last 1h</option>
+                <option value="6h">Last 6h</option>
+                <option value="24h" selected>Last 24h</option>
+                <option value="7d">Last 7d</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div class="field">
+              <span>Group Interval</span>
+              <input id="interval" value="15m" placeholder="15m/1h/1d" />
+            </div>
+            <div class="field">
+              <span>Sliding Step</span>
+              <input id="sliding" value="" placeholder="Optional" />
+            </div>
+            <div class="field">
+              <span>Fill</span>
+              <select id="fill">
+                <option value="none">none</option>
+                <option value="null" selected>null</option>
+                <option value="previous">previous</option>
+                <option value="linear">linear</option>
+                <option value="0">0</option>
+              </select>
+            </div>
+            <div class="field">
+              <span>Order</span>
+              <select id="order">
+                <option value="DESC" selected>DESC</option>
+                <option value="ASC">ASC</option>
+              </select>
+            </div>
+            <div class="field">
+              <span>Limit</span>
+              <input id="limit" type="number" value="1000" min="1" />
+            </div>
+            <div class="field">
+              <span>Group Level</span>
+              <input id="level" type="number" min="1" placeholder="Optional: 1/2/3..." />
+            </div>
           </div>
-          <div class="field">
-            <span>Ê±¼ä·¶Î§</span>
-            <select id="range">
-              <option value="15m">×î½ü15·ÖÖÓ</option>
-              <option value="1h">×î½ü1Ð¡Ê±</option>
-              <option value="6h">×î½ü6Ð¡Ê±</option>
-              <option value="24h" selected>×î½ü24Ð¡Ê±</option>
-              <option value="7d">×î½ü7Ìì</option>
-              <option value="custom">×Ô¶¨Òå</option>
-            </select>
+          <div class="row grid-2">
+            <div class="field">
+              <span>Start Time (Custom)</span>
+              <input id="startTime" type="datetime-local" />
+            </div>
+            <div class="field">
+              <span>End Time (Custom)</span>
+              <input id="endTime" type="datetime-local" />
+            </div>
           </div>
-          <div class="field">
-            <span>Group Interval</span>
-            <input id="interval" value="15m" placeholder="15m/1h/1d" />
-          </div>
-          <div class="field">
-            <span>Sliding Step</span>
-            <input id="sliding" value="" placeholder="¿ÉÑ¡, Ä¬ÈÏµÈÓÚinterval" />
-          </div>
-          <div class="field">
-            <span>Fill</span>
-            <select id="fill">
-              <option value="none">none</option>
-              <option value="null" selected>null</option>
-              <option value="previous">previous</option>
-              <option value="linear">linear</option>
-              <option value="0">0</option>
-            </select>
-          </div>
-          <div class="field">
-            <span>ÅÅÐò</span>
-            <select id="order">
-              <option value="DESC" selected>DESC</option>
-              <option value="ASC">ASC</option>
-            </select>
-          </div>
-          <div class="field">
-            <span>Limit</span>
-            <input id="limit" type="number" value="1000" min="1" />
-          </div>
-          <div class="field">
-            <span>Group Level</span>
-            <input id="level" type="number" min="1" placeholder="¿ÉÑ¡: 1/2/3..." />
+          <div class="row chk-row">
+            <label class="chk"><input id="enableGroup" type="checkbox" checked /> Enable GROUP BY</label>
+            <label class="chk"><input id="alignByDevice" type="checkbox" /> ALIGN BY DEVICE</label>
+            <label class="chk"><input id="withoutNull" type="checkbox" /> WITHOUT NULL ANY</label>
           </div>
         </div>
-        <div class="row grid-2">
-          <div class="field">
-            <span>¿ªÊ¼Ê±¼ä(×Ô¶¨Òå)</span>
-            <input id="startTime" type="datetime-local" />
+        </div>
+        <div class="row">
+          <button id="buildBtn">Build SQL</button>
+          <button id="runBtn">Run SQL</button>
+          <button id="toggleConsoleBtn" type="button">Console: OFF</button>
+        </div>
+        <div id="msg"></div>
+        <textarea id="sql" rows="8"></textarea>
+      </div>
+
+      <div id="dbInfoView" class="hidden">
+        <div class="db-view-head">
+          <h2 id="infoViewTitle">Database Info</h2>
+          <button id="backToQueryBtn" class="tab">Back to Query</button>
+        </div>
+
+        <div id="dbInfoMsg" class="msg-info"></div>
+
+        <div class="db-kv-grid">
+          <div class="db-kv-card"><span id="infoLabelName">Name</span><strong id="dbInfoName">-</strong></div>
+          <div class="db-kv-card"><span>TTL</span><strong id="dbInfoTtl">-</strong></div>
+          <div class="db-kv-card"><span id="infoLabelMetricA">Devices</span><strong id="dbInfoDeviceCount">-</strong></div>
+          <div class="db-kv-card"><span id="infoLabelMetricB">Timeseries</span><strong id="dbInfoTsCount">-</strong></div>
+          <div class="db-kv-card wide"><span id="infoLabelLastWrite">Last Write Time</span><strong id="dbInfoLastWrite">-</strong></div>
+        </div>
+
+        <div id="ttlSettingsCard" class="query-card">
+          <div class="db-ttl-title">TTL Settings</div>
+          <div class="db-ttl-row">
+            <select id="dbTtlPreset">
+              <option value="7">7d</option>
+              <option value="30" selected>30d</option>
+              <option value="90">90d</option>
+              <option value="180">180d</option>
+              <option value="365">365d</option>
+              <option value="custom">Custom days</option>
+              <option value="never">Never expire</option>
+            </select>
+            <input id="dbTtlDays" type="number" min="1" value="30" placeholder="Days" />
+            <button id="applyDbTtlBtn">Apply TTL</button>
           </div>
-          <div class="field">
-            <span>½áÊøÊ±¼ä(×Ô¶¨Òå)</span>
-            <input id="endTime" type="datetime-local" />
+          <div class="muted">Warning: reducing TTL may permanently clear historical data.</div>
+          <div id="ttlCompatHint" class="muted"></div>
+        </div>
+
+
+
+        <div id="pointActionCard" class="query-card hidden">
+          <div class="db-ttl-title">Point Actions</div>
+          <div class="db-ttl-row">
+            <input id="pointRetypeInput" placeholder="Target type, e.g. FLOAT" />
+            <button id="pointRetypeBtn" type="button">Apply Type</button>
+            <button id="pointDeleteBtn" type="button" class="btn-danger">Delete Point</button>
+          </div>
+          <div class="muted">Retype will delete and recreate this point (historical data will be removed).</div>
+        </div>
+
+        <div class="db-lists">
+          <div class="query-card">
+            <div id="infoListTitleA" class="db-ttl-title">Sample Devices</div>
+            <ul id="dbSampleDevices" class="db-list"></ul>
+          </div>
+          <div class="query-card">
+            <div id="infoListTitleB" class="db-ttl-title">Sample Timeseries</div>
+            <ul id="dbSampleTimeseries" class="db-list"></ul>
           </div>
         </div>
-        <div class="row chk-row">
-          <label class="chk"><input id="enableGroup" type="checkbox" checked /> ÆôÓÃ GROUP BY</label>
-          <label class="chk"><input id="alignByDevice" type="checkbox" /> ALIGN BY DEVICE</label>
-          <label class="chk"><input id="withoutNull" type="checkbox" /> WITHOUT NULL ANY</label>
-        </div>
       </div>
-      <div class="row">
-        <button id="buildBtn">Éú³ÉSQL</button>
-        <button id="runBtn">Ö´ÐÐSQL</button>
-      </div>
-      <div id="msg"></div>
-      <textarea id="sql" rows="8"></textarea>
     </section>
   </main>
 
   <script src="/static/app.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
 

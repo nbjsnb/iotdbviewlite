@@ -1,7 +1,11 @@
-.venv/
+﻿.venv/
 .venv312/
 __pycache__/
 *.pyc
 
 build/
 dist/
+
+iotdbview.log
+release_assets/
+

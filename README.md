@@ -1,5 +1,8 @@
 ﻿# iotdbviewlite
 
+版本：`1.0`
+
+
 基于 IoTDB 原生 Python Session (`apache-iotdb`) 的轻量查询工具仓库，当前仅提供 Flask Lite 版本。
 
 - Flask Lite 入口：`iotdbviewlite.py`
@@ -27,8 +30,8 @@ python iotdbviewlite.py
 
 或使用脚本：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run.ps1
+```bat
+start_iotdbview.bat
 ```
 
 默认地址：`http://127.0.0.1:7860`
@@ -48,5 +51,35 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 - Lite 页面模板：`templates/index.html`
 - Lite 前端脚本：`static/app.js`
 - Lite 样式：`static/style.css`
-- 启动脚本：`run.ps1`
+- 启动脚本：`start_iotdbview.bat`
 - 打包配置：`iotdbview.spec`、`iotdbview_dir.spec`
+
+
+## 托盘启动（推荐）
+
+支持启动后缩到系统托盘，托盘菜单包含：
+
+- `Open Browser`：打开默认浏览器访问 `http://127.0.0.1:7860`
+- `Open Log Console`：弹出独立控制台窗口，实时查看日志（可直接关闭）
+- `Exit`：退出托盘并关闭服务
+
+安装新增依赖：
+
+```powershell
+python -m pip install pystray Pillow
+```
+
+启动托盘版（启动后会立即返回当前终端，不阻塞）：
+
+```bat
+start_iotdbview.bat
+```
+
+如需不走托盘，仍可直接运行：
+
+```powershell
+python iotdbviewlite.py
+```
+
+
+
